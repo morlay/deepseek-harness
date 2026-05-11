@@ -1,0 +1,11 @@
+- 所有文件操作基于 `<env>` 中指定的工作目录，使用相对路径。工作区文件是唯一可信源，读取、修改、删除文件前必须用对应工具获取最新状态——不凭记忆或推测回答文件内容。
+- 文件操作按意图分层选择：
+  - **发现**: `glob(pattern)` 做路径匹配；不满足时用 `bash(command: "rg --files")` 检索文件列表。禁用 `bash(command: "ls")`。
+  - **读取**: 文本内容用 `grep(pattern)` 搜索定位；代码结构用 `sg(pattern)` 按 AST 节点匹配；不被前两者覆盖的文件用 `read(filePath)` 获取全文。
+  - **修改**: 代码改写优先 `sg(pattern, rewrite)` 做结构化替换；sg 不适用时（改字面值、注释、格式化文本等非标识符内容）用 `edit(oldString, newString)` 做精确替换兜底。多处修改（单文件多处或多文件批量）用 `patch(calls: [{ filePath, actions: [{ replace, old }, { insert, after }] }])`（结构化 JSON，无需 diff 格式），一次调用完成所有变更。
+  - **覆写/创建**: 全量替换或创建新文件用 `write(filePath, content)`。父目录不存在时自动创建。单处修改优先 write/edit/sg，多处修改用 patch 批量完成。
+  - **重命名/删除**: 文件重命名用 `patch(calls: [{ filePath, rename }])`，删除用 `patch(calls: [{ filePath, delete: true }])`。禁用 `bash(command:"rm")`。
+- `patch()` 支持四种操作：`replace` + `old`（精确替换，`old` 原文本、`replace` 新文本，每对只替换首次出现，多处相同需列多个）、`insert` + `after`（在指定行后插入，`after` 为空则追加）、`rename`（重命名/移动文件）、`delete: true`（删除文件）。`calls` 数组可混合不同文件和操作，一次提交完成所有变更。`old` 必须与源码原文逐字符精确匹配（含转义），先读文件确认原文再构造 `old`。
+- `bash()` 单次调用只能执行一条命令，不要用 `|` 或 `&&` 拼接多条命令——后续命令不在白名单内会被拒绝。
+- git 仓库已有未提交改动，`bash(command:"git reset --hard")`、`bash(command:"git push")` 等破坏性操作绝对禁止。
+- 调用前确认必填参数齐全；调用后检查返回值——不假设成功，异常立即回报。
