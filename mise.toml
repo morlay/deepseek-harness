@@ -1,0 +1,4 @@
+[tools]
+node = "26"
+aube = "latest"
+just = "latest"

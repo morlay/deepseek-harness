@@ -1,0 +1,6 @@
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - "effect@4.0.0-beta.66"
+  - "tinyexec@1.2.2"
+allowBuilds:
+  msgpackr-extract: true

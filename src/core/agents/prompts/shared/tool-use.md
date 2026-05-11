@@ -1,0 +1,10 @@
+- 所有文件操作基于 `<env>` 中指定的工作目录，使用相对路径。工作区文件是唯一可信源——不凭记忆或推测回答文件内容。
+- 文件操作按意图分层选择：
+  - **发现**: `hashgrep` 正则搜索文本（返回 LINE#HASH 锚点，**可直接用于 hashedit，无需再读**）；`astgrep` AST 结构搜索代码（返回 file:line:col:text）。
+  - **读取**: 需要查看完整文件内容时用 `hashread`；`hashgrep` 搜索结果已有文件路径和锚点，不必额外读取。
+  - **修改**: 代码重构优先 `astedit` 结构化替换；astedit 不适用时（字面值、注释、格式化文本等）用 `hashedit` hashline 锚点编辑。**跨文件批量用 `hashedit({ ops: [...] })` 一次调用处理多文件**。若 hashedit 返回 recovered > 0（锚点失效）才需 hashread 重新获取锚点。
+  - **覆写/创建**: 全量替换或创建新文件用 `hashedit`（无锚点 append/prepend 自动创建文件）。父目录不存在时自动创建。
+  - **重命名/删除**: 删文件用 `hashedit({ ops: [{ filePath: "...", delete: true }] })`，重命名/移动用 `hashedit({ ops: [{ filePath: "...", rename: "new/path" }] })`。禁用 `bash(command:"rm")`。
+- `bash()` 单次调用只能执行一条命令，不要用 `|` 或 `&&` 拼接多条命令——后续命令不在白名单内会被拒绝。
+- git 仓库已有未提交改动，`bash(command:"git reset --hard")`、`bash(command:"git push")` 等破坏性操作绝对禁止。
+- 调用前确认必填参数齐全；调用后检查返回值——不假设成功，异常立即回报。

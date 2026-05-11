@@ -1,0 +1,32 @@
+{
+  "name": "deepseek-harness",
+  "type": "module",
+  "private": false,
+  "packageManager": "aube@1.15.0",
+  "engines": {
+    "node": ">= 26"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/core/index.ts",
+    "./testing": "./src/testing/index.ts",
+    "./hashline": "./src/hashline/index.ts"
+  },
+  "dependencies": {
+    "@ast-grep/napi": "^0.42.3",
+    "@opencode-ai/plugin": "^1.15.10",
+    "@opencode-ai/sdk": "^1.15.10",
+    "@vscode/ripgrep": "^1.18.0",
+    "effect": "4.0.0-beta.66",
+    "es-toolkit": "^1.46.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@typescript/native-preview": "beta",
+    "oxlint": "^1.66.0",
+    "oxlint-tsgolint": "^0.23.0",
+    "prettier": "^3.8.3",
+    "vitest": "^4.1.7"
+  },
+  "prettier": {}
+}
