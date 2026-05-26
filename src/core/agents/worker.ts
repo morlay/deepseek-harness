@@ -1,5 +1,5 @@
 import { type AgentConfig } from "@opencode-ai/sdk/v2";
-import { readPromptWithShared, sharedBashPermission } from "./_shared.ts";
+import { readPromptWithShared, withPermission } from "./_shared.ts";
 
 export const worker = {
   mode: "subagent" as const,
@@ -7,7 +7,5 @@ export const worker = {
   temperature: 0.0,
   top_p: 0.9,
   model: "deepseek/deepseek-v4-flash",
-  permission: {
-    bash: sharedBashPermission,
-  },
+  permission: withPermission(true),
 } satisfies AgentConfig;

@@ -32,22 +32,46 @@ export const readPromptWithShared = async (name: string) => {
   return base;
 };
 
-export const sharedBashPermission = {
-  // 默认禁用一切 bash
-  "*": "deny",
+export const withPermission = (writable: boolean) =>
+  ({
+    // 自定义
+    hashread: "allow",
+    hashedit: writable ? "allow" : "deny",
+    hashgrep: "allow",
+    astgrep: "allow",
+    astedit: writable ? "allow" : "deny",
+    // 内置
+    glob: "allow",
+    lsp: "allow",
+    skill: "allow",
+    task: "allow",
+    todowrite: "allow",
+    webfetch: "allow",
+    write: "allow",
 
-  // just recipe — 唯一可用命令入口
-  "just *": "allow",
+    // 禁用
+    grep: "deny",
+    websearch: "deny",
+    edit: "deny",
+    read: "deny",
 
-  // 有限放行
-  "mv *": "allow",
-  "rg *": "allow",
-  "sg *": "allow",
-  "jq *": "allow",
+    bash: {
+      // 默认禁用一切 bash
+      "*": "deny",
 
-  // 版本控制
-  "git *": "allow",
-  "git push *": "deny",
-  "git reset --hard": "deny",
-  "git commit *": "ask",
-} as const;
+      // just recipe — 唯一可用命令入口
+      "just *": "allow",
+
+      // 有限放行
+      "mv *": "allow",
+      "rg *": "allow",
+      "sg *": "allow",
+      "jq *": "allow",
+
+      // 版本控制
+      "git *": "allow",
+      "git push *": "deny",
+      "git reset --hard": "deny",
+      "git commit *": "ask",
+    },
+  }) as const;

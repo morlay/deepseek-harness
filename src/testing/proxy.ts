@@ -68,6 +68,15 @@ export class LlmProxy {
     });
   }
 
+  /** 实时分析已捕获的日志 */
+  getStats(sinceIndex = 0): ProxyStats {
+    return parseStats(this.#logs.slice(sinceIndex));
+  }
+
+  get logCount(): number {
+    return this.#logs.length;
+  }
+
   #handle(req: IncomingMessage, res: ServerResponse): void {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
@@ -265,25 +274,124 @@ export class LlmProxy {
     return new Promise((resolve) => {
       this.#server.close(async () => {
         console.log("[llm-proxy] server closed");
-        await this.#flush();
+        await this.flush();
         resolve();
       });
     });
   }
 
-  async #flush(): Promise<void> {
+  async flush(): Promise<string | null> {
     if (this.#logs.length === 0) {
-      console.log("[llm-proxy] no chats captured, skipping flush");
-      return;
+      return null;
     }
     await mkdir(this.#logDir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const filename = join(this.#logDir, `log-${ts}.jsonl`);
     const content = this.#logs.map((e) => JSON.stringify(e)).join("\n") + "\n";
     await writeFile(filename, content);
-    console.log(
-      `[llm-proxy] flushed ${this.#logs.length} chats -> ${filename}`,
-    );
     this.#logs = [];
+    return filename;
   }
+}
+
+export interface ProxyStats {
+  chats: number;
+  tools: number;
+  toolFreq: Record<string, number>;
+  reasoningChats: number;
+  avgReasoningLen: number;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  timeline: ProxyChatStat[];
+}
+
+export interface ProxyChatStat {
+  index: number;
+  tools: string[];
+  reasoningPreview: string;
+}
+
+function parseStats(logs: ChatLogEntry[]): ProxyStats {
+  const toolFreq: Record<string, number> = {};
+  const timeline: ProxyChatStat[] = [];
+  let totalReasoningLen = 0;
+  let reasoningChats = 0;
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+
+  for (const [i, entry] of logs.entries()) {
+    const chat: ProxyChatStat = { index: i, tools: [], reasoningPreview: "" };
+
+    // 从 request body 的 messages 中提取 tool 结果消息中的工具名
+    const reqBody = entry.request?.body as Record<string, unknown> | undefined;
+    const reqMessages = reqBody?.messages as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (Array.isArray(reqMessages)) {
+      for (const m of reqMessages) {
+        if (m.role === "tool" && typeof m.tool === "string") {
+          chat.tools.push(m.tool);
+          toolFreq[m.tool] = (toolFreq[m.tool] ?? 0) + 1;
+        }
+      }
+    }
+
+    // 从 response body 的 choices 中提取 tool_calls 和 reasoning
+    const respBody = entry.response?.body as
+      | Record<string, unknown>
+      | undefined;
+    const choices = respBody?.choices as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (Array.isArray(choices)) {
+      for (const ch of choices) {
+        const msg = ch.message as Record<string, unknown> | undefined;
+        if (msg) {
+          if (typeof msg.reasoning_content === "string") {
+            chat.reasoningPreview = (msg.reasoning_content as string).slice(
+              0,
+              120,
+            );
+            reasoningChats++;
+            totalReasoningLen += (msg.reasoning_content as string).length;
+          }
+          const tcs = msg.tool_calls as
+            | Array<Record<string, unknown>>
+            | undefined;
+          if (Array.isArray(tcs)) {
+            for (const tc of tcs) {
+              const name = (tc.function as Record<string, string> | undefined)
+                ?.name;
+              if (name) {
+                chat.tools.push(name);
+                toolFreq[name] = (toolFreq[name] ?? 0) + 1;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const usage = respBody?.usage as Record<string, number> | undefined;
+    if (usage) {
+      totalPromptTokens += usage.prompt_tokens ?? 0;
+      totalCompletionTokens += usage.completion_tokens ?? 0;
+    }
+
+    if (chat.tools.length > 0 || chat.reasoningPreview) {
+      timeline.push(chat);
+    }
+  }
+
+  return {
+    chats: logs.length,
+    tools: Object.values(toolFreq).reduce((a, b) => a + b, 0),
+    toolFreq,
+    reasoningChats,
+    avgReasoningLen:
+      reasoningChats > 0 ? Math.round(totalReasoningLen / reasoningChats) : 0,
+    totalPromptTokens,
+    totalCompletionTokens,
+    timeline,
+  };
 }

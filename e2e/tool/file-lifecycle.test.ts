@@ -29,6 +29,7 @@ describe("file-lifecycle", () => {
     const content = await readFile(join(tmp.path, "hello.ts"), "utf-8");
     expect(content).toMatch(/hello/);
     expect(content).toMatch(/world/);
+    await ctx.logStats();
   }, 90_000);
 
   it("读取已有文件内容", async () => {
@@ -36,6 +37,7 @@ describe("file-lifecycle", () => {
 
     const content = await readFile(join(tmp.path, "hello.ts"), "utf-8");
     expect(content).toMatch(/hello/);
+    await ctx.logStats();
   }, 60_000);
 
   it("精确替换文本", async () => {
@@ -47,6 +49,7 @@ describe("file-lifecycle", () => {
     const content = await readFile(join(tmp.path, "hello.ts"), "utf-8");
     expect(content).toMatch(/open code/);
     expect(content).not.toMatch(/"world"/);
+    await ctx.logStats();
   }, 90_000);
 
   it("多行代码修改", async () => {
@@ -66,6 +69,7 @@ const c = 3;
     const content = await readFile(join(tmp.path, "target.ts"), "utf-8");
     expect(content).toContain("const b = 42");
     expect(content).not.toContain("const b = 2");
+    await ctx.logStats();
   }, 90_000);
 
   it("删除不需要的文件", async () => {
@@ -82,6 +86,7 @@ const c = 3;
       exists = false;
     }
     expect(exists).toBe(false);
+    await ctx.logStats();
   }, 90_000);
 
   it("从网络获取内容并保存为文件", async () => {
@@ -92,5 +97,6 @@ const c = 3;
 
     const content = await readFile(join(tmp.path, "httpbin.json"), "utf-8");
     expect(() => JSON.parse(content)).not.toThrow();
+    await ctx.logStats();
   }, 120_000);
 });

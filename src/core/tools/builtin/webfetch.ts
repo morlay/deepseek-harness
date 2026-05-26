@@ -3,8 +3,7 @@ import { Schema } from "effect";
 
 export const webfetch = (_ctx: PluginInput) =>
   ({
-    description:
-      "获取指定 URL 的内容，默认返回 markdown 格式。自动将 HTTP 升级为 HTTPS。",
+    description: "获取指定 URL 的内容，默认返回 markdown 格式",
     parameters: Schema.Struct({
       url: Schema.String.annotate({ description: "要获取的 URL 地址" }),
       format: Schema.optional(

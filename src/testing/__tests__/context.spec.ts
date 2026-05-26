@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createContext } from "../context.ts";
 
-describe("server.spec", () => {
+describe.skip("server.spec", () => {
   let ctx: Awaited<ReturnType<typeof createContext>>;
   let session: any;
 

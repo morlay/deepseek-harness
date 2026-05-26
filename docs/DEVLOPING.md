@@ -31,14 +31,13 @@ just vitest e2e/                             # E2E 测试
 
 ```
 src/
-  hashline/               # 引擎层：hash 计算、锚点格式、applyEdits
-    hashline.ts           # 核心实现
+  hashline/               # 引擎层：hash 计算、锚点编辑、read/grep 核心
+    hashline.ts           # computeLineHash、applyEdits、format*、grepAsHashline
+    grep.ts               # grepAsHashline (AsyncGenerator) — 文件/目录搜索
     index.ts              # 公开导出
-    __tests__/            # 单元测试（直接调函数）
-
+    __tests__/            # 单元测试（hash-consistency、index）
   astgrep/                # 引擎层：AST 搜索封装
     astgrep.ts            # toLang + astFindInFiles
-
   core/
     tools/                # 工具层：封装引擎为 opencode 工具
       hashread.ts
@@ -46,33 +45,33 @@ src/
       hashgrep.ts
       astgrep.ts
       astedit.ts
-      builtin/            # 内置工具描述覆盖
+      builtin/            # 内置工具描述/权限覆盖（汉化 opencode 原生工具）
       __tests__/          # 行为测试（验闭环）
-
-    index.ts              # 插件入口：tool + tool.definition
-    agents/               # Agent prompt 配置
-
+    index.ts              # 插件入口：tool + tool.definition + config
+    agents/               # Agent prompt + 权限配置
   testing/                # E2E 测试基础设施
 ```
 
 **分层原则**：
 
 - 引擎层不引入 `@opencode-ai/plugin` 等框架依赖
-- 工具层负责 schema 定义（zod）和框架适配，调用引擎层函数
+- hashline 层可直接在单元测试中调用；grep.ts 提供文件/目录搜索的核心实现
+- 工具层负责 schema 定义和框架适配，调用引擎层函数
+- builtin 层通过 `tool.definition` 钩子覆盖内置工具描述和 schema
+- 权限控制统一在 `src/core/agents/_shared.ts` 的 `withPermission()` 中
 - 每层独立可测——引擎层纯函数，工具层直接调 `execute()`
 
 ## 编码规范
 
 **命名**：
 
-- 函数命名反映行为：`applyEdits`（不是 `processEdit`）、`formatGrepAsHashline`
-- 文件命名反映职责：`hashread.ts`（不是 `read-v2.ts`）
-- 测试文件：`hashop.spec.ts`、`astop.spec.ts`（按功能域分组）
+- 函数命名反映行为：`applyEdits`、`formatGrepAsHashline`
+- 测试文件：`index.spec.ts`、`hash-consistency.spec.ts`、`hashop.spec.ts`
 
 **导入**：
 
 - 使用 `.ts` 扩展名（`moduleResolution: "bundler"`）
-- 引擎层不引用工具层，工具层不引用 builtin 层
+- 引擎层不引用工具层
 - 废止的模块直接删除，不留注释掉的代码
 
 **错误处理**：
@@ -86,6 +85,17 @@ src/
 - 公开 API 导出 `type`（如 `EditOp`、`EditResult`）
 - 内部辅助函数不导出
 - 避免 `as any`——使用 `satisfies` 或显式类型断言
+
+**字符串**
+
+- `"` 包裹
+- 多行使用 `\``，代码场景用, 如
+
+```
+const code = `
+const x
+`.trim()
+```
 
 ## 工作流
 
@@ -104,11 +114,11 @@ src/
 
 **三层测试金字塔**：
 
-| 层级         | 位置                        | 特点                           | 速度    |
-| ------------ | --------------------------- | ------------------------------ | ------- |
-| 引擎单元测试 | `src/hashline/__tests__/`   | 纯函数，直接调 API             | < 10ms  |
-| 工具行为测试 | `src/core/tools/__tests__/` | `execute()` 调用，验闭环       | < 100ms |
-| E2E 测试     | `e2e/`                      | 启动 opencode server，LLM 交互 | 10-120s |
+| 层级         | 位置                        | 特点                                           | 速度    |
+| ------------ | --------------------------- | ---------------------------------------------- | ------- |
+| 引擎单元测试 | `src/hashline/__tests__/`   | 纯函数 + hash 一致性 + grepAsHashline 直接验证 | < 10ms  |
+| 工具行为测试 | `src/core/tools/__tests__/` | `execute()` 调用，验闭环                       | < 100ms |
+| E2E 测试     | `e2e/`                      | 启动 opencode server，LLM 交互                 | 10-120s |
 
 **测试原则**：
 

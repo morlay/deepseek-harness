@@ -1,13 +1,22 @@
 import { tool } from "@opencode-ai/plugin";
 import { readFile, writeFile as fsWriteFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import type { SgNode } from "@ast-grep/napi";
 import { astFindInFiles } from "../../astgrep/astgrep.ts";
+
+function expandRewrite(rewrite: string, node: SgNode): string {
+  return rewrite.replace(/\$(\w+)/g, (_, name) => {
+    const matched = node.getMatch(name);
+    return matched ? matched.text() : `$${name}`;
+  });
+}
 
 export const astedit = () =>
   tool({
-    description:
-      "AST 结构化改写。dryRun=true 预览 diff，dryRun=false 写入文件。pattern 搜索，rewrite 替换（$ 变量原值输出）。\n" +
-      '示例: astedit({ pattern: "const $NAME = $VALUE", rewrite: "let $NAME = $VALUE", lang: "typescript", dryRun: false })',
+    description: `
+AST 结构化改写。dryRun=true 仅预览 diff，dryRun=false 写入文件。pattern 搜索匹配，rewrite 替换（$ 变量展开为匹配到的原值）。
+示例: astedit(pattern: "const $NAME = $VALUE", rewrite: "let $NAME = $VALUE", lang: "typescript", dryRun: false)
+`.trim(),
     args: {
       pattern: tool.schema.string().meta({ description: "AST 匹配模式" }),
       rewrite: tool.schema
@@ -20,7 +29,7 @@ export const astedit = () =>
       path: tool.schema
         .string()
         .optional()
-        .meta({ description: "搜索的目录或文件（相对路径）" }),
+        .meta({ description: "搜索的目录或文件" }),
       dryRun: tool.schema
         .boolean()
         .optional()
@@ -42,14 +51,15 @@ export const astedit = () =>
           for (const node of nodes) {
             const filePath = node.getRoot().filename();
             const oldText = node.text();
+            const expanded = expandRewrite(args.rewrite, node);
             if (isDryRun) {
               const range = node.range();
               results.push(
-                `--- ${filePath}:${range.start.line + 1}\n- ${oldText}\n+ ${args.rewrite}`,
+                `--- ${filePath}:${range.start.line + 1}\n- ${oldText}\n+ ${expanded}`,
               );
             } else {
               if (!fileEdits.has(filePath)) fileEdits.set(filePath, []);
-              fileEdits.get(filePath)!.push({ oldText, newText: args.rewrite });
+              fileEdits.get(filePath)!.push({ oldText, newText: expanded });
             }
           }
         },

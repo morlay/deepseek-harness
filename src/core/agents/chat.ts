@@ -6,9 +6,7 @@ export const chat = {
   temperature: 0.7,
   top_p: 0.9,
   permission: {
-    edit: "deny",
-    bash: "deny",
+    "*": "deny",
     webfetch: "allow",
-    external_directory: "deny",
   },
 } satisfies AgentConfig;

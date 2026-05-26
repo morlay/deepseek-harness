@@ -39,6 +39,7 @@ console.log(subtract(5, 3));
 
     const messages = await ctx.messages(session);
     expect(toolsCalled(messages, "glob")).toBeGreaterThan(0);
+    await ctx.logStats();
   }, 90_000);
 
   it("按文本内容搜索 — hashgrep / astgrep", async () => {
@@ -55,6 +56,7 @@ console.log(subtract(5, 3));
         toolsCalled(messages, "bash"),
       "应使用搜索工具",
     ).toBeGreaterThan(0);
+    await ctx.logStats();
   }, 90_000);
 
   it("代码重构——重命名函数并更新所有引用", async () => {
@@ -70,5 +72,6 @@ console.log(subtract(5, 3));
     expect(utils).not.toContain("subtract");
     expect(app).toContain("minus");
     expect(app).not.toContain("subtract");
+    await ctx.logStats();
   }, 90_000);
 });

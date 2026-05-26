@@ -5,7 +5,10 @@ const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const bash = (ctx: PluginInput) =>
   ({
-    description: `执行 bash 命令。单次调用只能执行一条命令，不要用 \`|\` 或 \`&&\` 拼接多条命令。可用命令由系统权限配置控制，运行时白名单校验。示例: bash(command:"rg export src/", description:"搜索代码")`,
+    description: `
+执行 bash 命令。单次调用只能执行一条命令，不要用 \`|\` 或 \`&&\` 拼接多条命令。可用命令由系统权限配置控制，运行时白名单校验。
+示例: bash(command: "rg export src/", description: "搜索代码")
+`.trim(),
     parameters: Schema.Struct({
       command: Schema.String.annotate({
         description: "要执行的命令",

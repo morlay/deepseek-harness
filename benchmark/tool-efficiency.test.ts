@@ -92,6 +92,7 @@ async function runBenchmark(
     result.toolCalls = extractToolCalls(msgs);
 
     await verify();
+    void ctx.logStats();
     await tmp.destroy();
   } catch (e: any) {
     result.failed = true;

@@ -35,6 +35,7 @@ export const subtract = (a, b) => a - b
     const content = await readFile(join(tmp.path, "src/utils.ts"), "utf-8");
     expect(content).toContain("minus");
     expect(content).not.toContain("subtract");
+    await ctx.logStats();
   }, 90_000);
 
   it("hashedit 多文件批量编辑", async () => {
@@ -53,6 +54,7 @@ export const subtract = (a, b) => a - b
       expect(content).toContain("0.0.0.0");
       expect(content).not.toContain("localhost");
     }
+    await ctx.logStats();
   }, 120_000);
 
   it("hashedit 创建新文件", async () => {
@@ -63,5 +65,6 @@ export const subtract = (a, b) => a - b
 
     const content = await readFile(join(tmp.path, "docs/readme.md"), "utf-8");
     expect(content).toMatch(/Hello/);
+    await ctx.logStats();
   }, 90_000);
 });

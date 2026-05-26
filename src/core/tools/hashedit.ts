@@ -9,61 +9,68 @@ import {
 import { resolve, dirname } from "node:path";
 import { applyEdits, parseLineRef, type EditOp } from "../../hashline/index.ts";
 
+const lineRefSchema = tool.schema
+  .string()
+  .regex(/^\d+#[A-Z]{2}$/, "格式 LINE#HASH 如 2#AB");
+
 export const hashedit = () =>
   tool({
-    description:
-      '跨文件批量编辑/删除/重命名。ops 每项 { filePath, edits }、{ filePath, delete:true } 或 { filePath, rename }。edits 支持 replace/append/prepend/delete，锚点来自 hashread 或 hashgrep。pos/end 支持 string|string[]。无锚点（或无效锚点如 "end"）的 append/prepend 可创建新文件，父目录自动创建。\n' +
-      '示例: hashedit({ ops: [{ filePath: "a.ts", edits: [{ op: "replace", pos: "2#AB", content: "new" }] }, { filePath: "b.ts", delete: true }, { filePath: "old.ts", rename: "new.ts" }, { filePath: "new.txt", edits: [{ op: "append", content: "hello" }] }] })',
+    description: `
+跨文件批量编辑/删除/重命名。ops 每项 { filePath, edits }、{ filePath, delete:true } 或 { filePath, rename }。
+edits 支持四种操作，锚点来自 hashread 或 hashgrep：
+  replace: 在 pos 行或 pos~end 范围内将 oldStr 替换为 newStr
+  delete:  删除 pos 行；传 end 则删除 pos~end 范围
+  append:  在 pos 行后追加 content（无 pos 则追加到文件末尾）
+  prepend: 在 pos 行前插入 content
+pos/end 为单个 LINE#HASH 锚点；同文件多处修改请传多条 edit。无锚点 append 可创建新文件，父目录自动创建。返回 diff（-LINE#HASH 为被删旧行，+LINE#HASH 为当前最新锚点），+ 锚点可直接用于下一轮编辑。若编辑改变了行号（删除/插入等），末尾追加 @line(>N, line => line + delta) 指示受影响行的行号偏移，用于推算旧锚点的新行号。
+示例: hashedit(ops: [{ filePath: "a.ts", edits: [{ op: "replace", pos: "2#AB", oldStr: "old", newStr: "new" }] }, { filePath: "b.ts", delete: true }])
+`.trim(),
     args: {
       ops: tool.schema
         .array(
           tool.schema.object({
-            filePath: tool.schema
-              .string()
-              .meta({ description: "文件相对路径" }),
+            filePath: tool.schema.string().meta({ description: "文件路径" }),
             edits: tool.schema
               .array(
-                tool.schema.object({
-                  op: tool.schema
-                    .enum(["replace", "append", "prepend", "delete"])
-                    .meta({ description: "操作类型" }),
-                  pos: tool.schema
-                    .union([
-                      tool.schema
-                        .string()
-                        .regex(/^\d+#[A-Z]{2}$/, "格式 LINE#HASH 如 2#AB"),
-                      tool.schema.array(
-                        tool.schema
-                          .string()
-                          .regex(/^\d+#[A-Z]{2}$/, "格式 LINE#HASH 如 2#AB"),
-                      ),
-                    ])
-                    .optional()
-                    .meta({
-                      description:
-                        "锚点，格式 LINE#HASH（如 2#AB）。不传则无锚点操作",
-                    }),
-                  end: tool.schema
-                    .union([
-                      tool.schema
-                        .string()
-                        .regex(/^\d+#[A-Z]{2}$/, "格式 LINE#HASH 如 2#AB"),
-                      tool.schema.array(
-                        tool.schema
-                          .string()
-                          .regex(/^\d+#[A-Z]{2}$/, "格式 LINE#HASH 如 2#AB"),
-                      ),
-                    ])
-                    .optional()
-                    .meta({
-                      description:
-                        "结束锚点（replace/delete 范围），数组与 pos 等长",
-                    }),
-                  content: tool.schema
-                    .string()
-                    .optional()
-                    .meta({ description: "新内容，多行用 \\n 分隔" }),
-                }),
+                tool.schema.discriminatedUnion("op", [
+                  tool.schema.object({
+                    op: tool.schema.literal("replace"),
+                    pos: lineRefSchema.meta({ description: "起始锚点" }),
+                    end: lineRefSchema
+                      .optional()
+                      .meta({ description: "结束锚点（可选范围）" }),
+                    oldStr: tool.schema
+                      .string()
+                      .min(1)
+                      .meta({ description: "要替换的原始文本" }),
+                    newStr: tool.schema
+                      .string()
+                      .meta({ description: "替换后的新文本" }),
+                  }),
+                  tool.schema.object({
+                    op: tool.schema.literal("append"),
+                    pos: lineRefSchema
+                      .optional()
+                      .meta({ description: "锚点；不传则追加到文件末尾" }),
+                    content: tool.schema
+                      .string()
+                      .meta({ description: "追加内容，多行用 \\n 分隔" }),
+                  }),
+                  tool.schema.object({
+                    op: tool.schema.literal("prepend"),
+                    pos: lineRefSchema.meta({ description: "锚点" }),
+                    content: tool.schema
+                      .string()
+                      .meta({ description: "插入内容，多行用 \\n 分隔" }),
+                  }),
+                  tool.schema.object({
+                    op: tool.schema.literal("delete"),
+                    pos: lineRefSchema.meta({ description: "起始锚点" }),
+                    end: lineRefSchema
+                      .optional()
+                      .meta({ description: "结束锚点（可选范围）" }),
+                  }),
+                ]),
               )
               .optional()
               .meta({ description: "编辑操作列表（与 delete/rename 互斥）" }),
@@ -83,12 +90,7 @@ export const hashedit = () =>
     async execute(args, ctx) {
       const ops = args.ops as {
         filePath: string;
-        edits?: {
-          op: string;
-          pos?: string | string[];
-          end?: string | string[];
-          content?: string;
-        }[];
+        edits?: ToolEditInput[];
         delete?: boolean;
         rename?: string;
       }[];
@@ -100,7 +102,6 @@ export const hashedit = () =>
       const outputs: string[] = [];
       let totalFiles = 0;
       let totalEdits = 0;
-      let totalRecovered = 0;
 
       for (const op of ops) {
         const absPath = resolve(ctx.directory, op.filePath);
@@ -109,7 +110,7 @@ export const hashedit = () =>
           const dest = resolve(ctx.directory, op.rename);
           await mkdir(dirname(dest), { recursive: true });
           await rename(absPath, dest);
-          outputs.push(`→ ${op.filePath} → ${op.rename}`);
+          outputs.push(`M ${op.filePath} → ${op.rename}`);
           totalFiles++;
           continue;
         }
@@ -117,10 +118,10 @@ export const hashedit = () =>
         if (op.delete) {
           try {
             await rm(absPath, { force: true });
-            outputs.push(`✗ ${op.filePath}`);
+            outputs.push(`D ${op.filePath}`);
             totalFiles++;
           } catch {
-            outputs.push(`✗ ${op.filePath} (不存在)`);
+            outputs.push(`D ${op.filePath} (不存在)`);
           }
           continue;
         }
@@ -131,49 +132,21 @@ export const hashedit = () =>
           );
         }
 
-        const expandedEdits: EditOp[] = [];
-        for (const e of op.edits) {
-          const rawPosArr = normalizeAnchor(e.pos);
-          const rawEndArr = normalizeAnchor(e.end);
-          const posArr = rawPosArr.filter((p) => isValidHashAnchor(p));
-          const endArr = rawEndArr.filter((p) => isValidHashAnchor(p));
-          const newContent = e.content ?? "";
-
-          if (posArr.length === 0) {
-            expandedEdits.push({ op: e.op, content: newContent } as EditOp);
-          } else if (endArr.length > 0 && endArr.length !== posArr.length) {
-            throw new Error(
-              `pos/end 长度不匹配 (${posArr.length} vs ${endArr.length}): ${op.filePath}`,
-            );
-          } else {
-            for (let i = 0; i < posArr.length; i++) {
-              expandedEdits.push({
-                op: e.op,
-                pos: posArr[i]!,
-                end: endArr[i] ?? undefined,
-                content: newContent,
-              } as EditOp);
-            }
-          }
-        }
+        const expandedEdits = op.edits.map((e) => toEditOp(op.filePath, e));
 
         let content: string;
         try {
           content = await readFile(absPath, "utf-8");
         } catch {
           const canCreate = expandedEdits.every(
-            (e) => (e.op === "append" || e.op === "prepend") && !e.pos,
+            (e) => e.op === "append" && !e.pos,
           );
           if (canCreate) {
+            const result = applyEdits("", expandedEdits);
             await mkdir(dirname(absPath), { recursive: true });
-            await fsWriteFile(
-              absPath,
-              expandedEdits
-                .map((e) => (e as { content: string }).content)
-                .join("\n"),
-              "utf-8",
-            );
-            outputs.push(`+ ${op.filePath}`);
+            await fsWriteFile(absPath, result.content, "utf-8");
+            const changed = result.changed ? `\n${result.changed}` : "";
+            outputs.push(`+ ${op.filePath}${changed}`);
             totalFiles++;
             totalEdits += expandedEdits.length;
             continue;
@@ -186,32 +159,66 @@ export const hashedit = () =>
 
         totalFiles++;
         totalEdits += expandedEdits.length;
-        totalRecovered += result.recovered;
 
-        const status =
-          result.recovered > 0
-            ? `~ ${op.filePath} (${result.recovered}/${expandedEdits.length} 恢复)`
-            : `✓ ${op.filePath}`;
-        outputs.push(status);
+        // diff 风格输出
+        const changed = result.changed ? `\n${result.changed}` : "";
+        outputs.push(`E ${op.filePath}${changed}`);
       }
 
-      const rec = totalRecovered > 0 ? ` (${totalRecovered} 恢复)` : "";
-      return {
-        output: `已处理 ${totalFiles} 文件/${totalEdits} 处${rec}:\n${outputs.join("\n")}`,
-      };
+      return { output: outputs.join("\n") };
     },
   });
 
-function isValidHashAnchor(a: string): boolean {
-  try {
-    parseLineRef(a);
-    return true;
-  } catch {
-    return false;
+type ToolEditInput = {
+  op: EditOp["op"];
+  pos?: string;
+  end?: string;
+  content?: string;
+  oldStr?: string;
+  newStr?: string;
+};
+
+function toEditOp(filePath: string, edit: ToolEditInput): EditOp {
+  if (edit.op === "append") {
+    const content = edit.content ?? "";
+    if (!edit.pos) return { op: "append", content };
+    return { op: "append", pos: normalizeAnchor(edit.pos), content };
   }
+
+  if (!edit.pos) {
+    throw new Error(`hashedit: ${filePath} 的 ${edit.op} 需要 pos 锚点`);
+  }
+  const pos = normalizeAnchor(edit.pos);
+
+  if (edit.op === "prepend") {
+    const content = edit.content ?? "";
+    return { op: "prepend", pos, content };
+  }
+
+  if (edit.op === "delete") {
+    return {
+      op: "delete",
+      pos,
+      ...(edit.end ? { end: normalizeAnchor(edit.end) } : {}),
+    };
+  }
+
+  if (edit.oldStr === undefined || edit.newStr === undefined) {
+    throw new Error(`hashedit: ${filePath} 的 replace 需要 oldStr 和 newStr`);
+  }
+  const oldStr = edit.oldStr;
+  const newStr = edit.newStr;
+
+  return {
+    op: "replace",
+    pos,
+    ...(edit.end ? { end: normalizeAnchor(edit.end) } : {}),
+    oldStr,
+    newStr,
+  };
 }
 
-function normalizeAnchor(a: string | string[] | undefined): string[] {
-  if (!a) return [];
-  return Array.isArray(a) ? a : [a];
+function normalizeAnchor(anchor: string): string {
+  parseLineRef(anchor);
+  return anchor;
 }

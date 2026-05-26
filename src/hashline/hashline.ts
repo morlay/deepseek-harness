@@ -1,9 +1,43 @@
-/**
- * Hashline engine — LINE#HASH:CONTENT 格式的内容锚点编辑。
- * 基于 oh-my-pi/pi-hashline-edit 简化实现，使用 Node.js 标准库 crypto。
- */
+// LINE#HASH
+export type Pos = string;
 
-import { createHash } from "node:crypto";
+export type EditOp =
+  | {
+      // 替换单行或范围内容
+      op: "replace";
+      pos: Pos;
+      end?: Pos;
+      oldStr: string;
+      newStr: string;
+    }
+  | {
+      // 向后插入内容, 无 pos 时
+      op: "append";
+      pos?: Pos;
+      content: string;
+    }
+  | {
+      // 在指定行前面插入内容
+      op: "prepend";
+      pos: Pos;
+      content: string;
+    }
+  | {
+      // 单行或范围删除
+      op: "delete";
+      pos: Pos;
+      end?: Pos;
+    };
+
+// 多行格式，类似 diff, 连续区域先删后减
+// -LINE#HASH
+// +LINE#HASH
+type Changed = string;
+
+export interface EditResult {
+  content: string;
+  changed: Changed;
+}
 
 /** 自定义哈希字母表（16字符，排除易混淆字符） */
 const NIBBLE_STR = "ZPMQVRWSNKTXJBYH";
@@ -14,274 +48,501 @@ const DICT = Array.from({ length: 256 }, (_, i) => {
 });
 
 const RE_SIGNIFICANT = /[\p{L}\p{N}]/u;
+const FNV_OFFSET = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
 
-function xxh32(input: string, seed = 0): number {
-  const h = createHash("sha256").update(`${seed}:${input}`).digest();
-  return h.readUInt32BE(0) >>> 0;
+function mixHash32(h: number): number {
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x7feb352d);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x846ca68b);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+function hash32(input: string, seed = 0): number {
+  let h = (FNV_OFFSET ^ seed) >>> 0;
+  for (let i = 0; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    h ^= code & 0xff;
+    h = Math.imul(h, FNV_PRIME);
+    h ^= code >>> 8;
+    h = Math.imul(h, FNV_PRIME);
+  }
+  return mixHash32(h ^ input.length);
 }
 
 /** 计算单行内容哈希（2字符） */
 export function computeLineHash(idx: number, line: string): string {
-  line = line.replace(/\r/g, "").trimEnd();
+  line = line.trimEnd();
+  if (line.includes("\r")) line = line.replaceAll("\r", "");
   let seed = 0;
   if (!RE_SIGNIFICANT.test(line)) {
     seed = idx;
   }
-  return DICT[xxh32(line, seed) & 0xff]!;
+  return DICT[hash32(line, seed) & 0xff]!;
 }
 
-/** 将多行内容格式化为 hashline 格式: LINE#HASH:CONTENT */
-export function formatHashlineRegion(
-  lines: string[],
-  startLine: number,
-): string {
-  const lnw = String(startLine + Math.max(0, lines.length - 1)).length;
-  return lines
-    .map((line, index) => {
-      const ln = startLine + index;
-      return `${String(ln).padStart(lnw, " ")}#${computeLineHash(ln, line)}:${line}`;
-    })
-    .join("\n");
-}
-
-/** 解析 LINE#HASH 锚点引用 */
 export function parseLineRef(ref: string): { line: number; hash: string } {
-  const core = ref.replace(/^\s*[>+-]*\s*/, "").trimEnd();
-  const match = core.match(/^([0-9]+)\s*#\s*([A-Z]{2})$/);
-  if (!match)
-    throw new Error(`[E_BAD_REF] 无效锚点 "${ref}"，期望格式 "LINE#HASH"`);
-  return { line: Number.parseInt(match[1]!, 10), hash: match[2]! };
-}
-
-/** 将文件内容转为 hashline 格式 */
-export function formatFileAsHashline(content: string): string {
-  const lines = content.split("\n");
-  if (content.endsWith("\n")) lines.pop();
-  return formatHashlineRegion(lines, 1);
-}
-
-// ─── Edit ────────────────────────────────────────────────
-
-export type EditOp =
-  | { op: "replace"; pos: string; end?: string; content: string }
-  | { op: "append"; pos?: string; content: string }
-  | { op: "prepend"; pos?: string; content: string }
-  | { op: "delete"; pos: string; end?: string };
-
-export interface EditResult {
-  content: string;
-  recovered: number;
-}
-
-/** 剥除 hashline 格式前缀 (LINE#HASH:)，提取纯文本内容 */
-export function stripHashline(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => line.replace(/^\s*\d+#[A-Z]{2}:/, ""))
-    .join("\n");
-}
-
-/**
- * 类似 Go strings.Lines：保留每行末尾 \n 的行迭代器。
- * 空字符串不产出任何行。最后一行若不以 \n 结尾则不附带 \n。
- * 精确重建原始字符串用 join("")。
- */
-export function* lines(content: string): Generator<string> {
-  let remaining = content;
-  while (remaining.length > 0) {
-    const i = remaining.indexOf("\n");
-    if (i >= 0) {
-      yield remaining.slice(0, i + 1); // 包含 \n
-      remaining = remaining.slice(i + 1);
-    } else {
-      yield remaining; // 最后一行，不带 \n
-      remaining = "";
-    }
+  let index = skipAsciiWhitespace(ref, 0);
+  while (index < ref.length) {
+    const code = ref.charCodeAt(index);
+    if (code !== 43 && code !== 45 && code !== 62) break;
+    index++;
   }
+  index = skipAsciiWhitespace(ref, index);
+
+  const lineStart = index;
+  while (index < ref.length && isAsciiDigit(ref.charCodeAt(index))) index++;
+  if (index === lineStart) return badLineRef(ref);
+
+  const line = Number.parseInt(ref.slice(lineStart, index), 10);
+  index = skipAsciiWhitespace(ref, index);
+  if (ref.charCodeAt(index) !== 35) return badLineRef(ref);
+  index = skipAsciiWhitespace(ref, index + 1);
+
+  if (
+    index + 2 > ref.length ||
+    !isUpperAsciiLetter(ref.charCodeAt(index)) ||
+    !isUpperAsciiLetter(ref.charCodeAt(index + 1))
+  ) {
+    return badLineRef(ref);
+  }
+  const hash = ref.slice(index, index + 2);
+  index = skipAsciiWhitespace(ref, index + 2);
+  if (index !== ref.length) return badLineRef(ref);
+  return { line, hash };
 }
 
-/** 类似 Go strings.Lines + 附上行号和哈希，一次遍历。 */
-export function* hashlines(
+function badLineRef(ref: string): never {
+  throw new Error(`[E_BAD_REF] 无效锚点 "${ref}"，期望格式 "LINE#HASH"`);
+}
+
+function isAsciiDigit(code: number): boolean {
+  return code >= 48 && code <= 57;
+}
+
+function isUpperAsciiLetter(code: number): boolean {
+  return code >= 65 && code <= 90;
+}
+
+function isAsciiWhitespace(code: number): boolean {
+  return code === 9 || code === 10 || code === 13 || code === 32;
+}
+
+function skipAsciiWhitespace(text: string, start: number): number {
+  let index = start;
+  while (index < text.length && isAsciiWhitespace(text.charCodeAt(index))) {
+    index++;
+  }
+  return index;
+}
+
+export function formatFileAsHashline(content: string): string {
+  const output: string[] = [];
+  forEachLineSpan(content, (start, end, lineNumber) => {
+    const text = lineText(content, start, end);
+    if (text.length > 0) {
+      output.push(`${lineNumber}#${computeLineHash(lineNumber, text)}:${text}`);
+    }
+  });
+  return output.join("\n");
+}
+
+function forEachLineSpan(
   content: string,
-): Generator<[{ lineNumber: number; hash: string }, string]> {
+  visit: (start: number, end: number, lineNumber: number) => void,
+) {
+  let start = 0;
   let lineNumber = 1;
-  for (const raw of lines(content)) {
-    const lineContent = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
-    yield [{ lineNumber, hash: computeLineHash(lineNumber, lineContent) }, raw];
+  while (start < content.length) {
+    const end = content.indexOf("\n", start);
+    if (end === -1) {
+      visit(start, content.length, lineNumber);
+      break;
+    }
+    visit(start, end + 1, lineNumber);
+    start = end + 1;
     lineNumber++;
   }
 }
 
-function editStartLine(edit: EditOp): number {
-  if (edit.op === "replace" || edit.op === "delete") {
-    return parseLineRef(edit.pos).line;
+interface LineRecord {
+  lineNumber: number;
+  hash: string;
+  start: number;
+  end: number;
+  endsWithNewline: boolean;
+}
+
+type PreparedEdit =
+  | {
+      op: "replace";
+      order: number;
+      start: number;
+      end: number;
+      replacement: string;
+    }
+  | { op: "delete"; order: number; start: number; end: number }
+  | { op: "append"; order: number; index: number; content: string }
+  | { op: "prepend"; order: number; index: number; content: string }
+  | { op: "append-eof"; order: number; content: string };
+
+type RangeEdit = Extract<PreparedEdit, { op: "replace" | "delete" }>;
+
+function lineText(content: string, start: number, end: number): string {
+  let textEnd = end;
+  if (textEnd > start && content.charCodeAt(textEnd - 1) === 10) {
+    textEnd--;
+    if (textEnd > start && content.charCodeAt(textEnd - 1) === 13) {
+      textEnd--;
+    }
   }
-  if (edit.pos) {
-    return parseLineRef(edit.pos).line;
+  return content.slice(start, textEnd);
+}
+
+function toLineRecords(content: string): LineRecord[] {
+  const records: LineRecord[] = [];
+  forEachLineSpan(content, (start, end, lineNumber) => {
+    const text = lineText(content, start, end);
+    records.push({
+      lineNumber,
+      hash: computeLineHash(lineNumber, text),
+      start,
+      end,
+      endsWithNewline: content.charCodeAt(end - 1) === 10,
+    });
+  });
+  return records;
+}
+
+function rawLineTexts(text: string): string[] {
+  const texts: string[] = [];
+  forEachLineSpan(text, (start, end) => texts.push(lineText(text, start, end)));
+  return texts;
+}
+
+function editContentLines(text: string): string[] {
+  return rawLineTexts(text);
+}
+
+function changedLine(prefix: "-" | "+", lineNumber: number, text: string) {
+  return `${prefix}${lineNumber}#${computeLineHash(lineNumber, text)}`;
+}
+
+function anchorNoMatch(anchor: string): never {
+  throw new Error(`[E_NO_MATCH] 锚点 "${anchor}" 未找到或哈希不匹配`);
+}
+
+function resolveAnchor(records: LineRecord[], anchor: string): LineRecord {
+  const ref = parseLineRef(anchor);
+  const record = records[ref.line - 1];
+  if (!record || record.hash !== ref.hash) anchorNoMatch(anchor);
+  return record;
+}
+
+function assertRange(start: LineRecord, end: LineRecord, edit: EditOp) {
+  if (end.lineNumber < start.lineNumber) {
+    const endRef =
+      edit.op === "replace" || edit.op === "delete" ? edit.end : undefined;
+    throw new Error(
+      `[E_BAD_RANGE] 结束锚点 "${endRef}" 不能早于起始锚点 "${edit.pos}"`,
+    );
   }
-  return edit.op === "append" ? Infinity : 0;
+}
+
+function insertionBeforeLine(content: string): string {
+  if (content.length === 0) return "";
+  return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function insertionAfterLine(
+  lineEndsWithNewline: boolean,
+  content: string,
+): string {
+  if (content.length === 0) return "";
+  const prefix = lineEndsWithNewline ? "" : "\n";
+  const suffix = lineEndsWithNewline && !content.endsWith("\n") ? "\n" : "";
+  return `${prefix}${content}${suffix}`;
+}
+
+function contentLineCount(content: string): number {
+  let count = 0;
+  forEachLineSpan(content, () => {
+    count++;
+  });
+  return count;
+}
+
+function insertionAtEof(currentContent: string, content: string): string {
+  if (content.length === 0) return "";
+  if (currentContent.length === 0) return content;
+  const prefix = currentContent.endsWith("\n") ? "" : "\n";
+  const suffix =
+    currentContent.endsWith("\n") && !content.endsWith("\n") ? "\n" : "";
+  return `${prefix}${content}${suffix}`;
+}
+
+function appendChanged(
+  changes: string[],
+  prefix: "-" | "+",
+  startLine: number,
+  texts: string[],
+) {
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i]!;
+    if (text.length === 0) continue;
+    changes.push(changedLine(prefix, startLine + i, text));
+  }
+}
+
+function joinRawRecords(
+  content: string,
+  records: LineRecord[],
+  start: number,
+  end: number,
+) {
+  return content.slice(records[start]!.start, records[end]!.end);
+}
+
+function prepareEdit(
+  content: string,
+  records: LineRecord[],
+  edit: EditOp,
+  order: number,
+): PreparedEdit {
+  if (edit.op === "append" && !edit.pos) {
+    return { op: "append-eof", order, content: edit.content };
+  }
+
+  if (!edit.pos) {
+    throw new Error(`[E_BAD_REF] ${edit.op}.pos 不能为空`);
+  }
+
+  const start = resolveAnchor(records, edit.pos);
+  const startIndex = start.lineNumber - 1;
+
+  if (edit.op === "append") {
+    return { op: "append", order, index: startIndex, content: edit.content };
+  }
+  if (edit.op === "prepend") {
+    return { op: "prepend", order, index: startIndex, content: edit.content };
+  }
+
+  const end = edit.end ? resolveAnchor(records, edit.end) : start;
+  assertRange(start, end, edit);
+  const endIndex = end.lineNumber - 1;
+
+  if (edit.op === "delete") {
+    return { op: "delete", order, start: startIndex, end: endIndex };
+  }
+
+  if (edit.oldStr.length === 0) {
+    throw new Error("[E_BAD_EDIT] replace.oldStr 不能为空");
+  }
+
+  const selected = joinRawRecords(content, records, startIndex, endIndex);
+  if (!selected.includes(edit.oldStr)) {
+    throw new Error(
+      `[E_NO_MATCH] oldStr 未在锚点范围 "${edit.pos}${edit.end ? `~${edit.end}` : ""}" 内找到`,
+    );
+  }
+
+  return {
+    op: "replace",
+    order,
+    start: startIndex,
+    end: endIndex,
+    replacement: selected.replace(edit.oldStr, edit.newStr),
+  };
+}
+
+function isRangeEdit(edit: PreparedEdit): edit is RangeEdit {
+  return edit.op === "replace" || edit.op === "delete";
+}
+
+function editIndex(edit: PreparedEdit): number {
+  if (isRangeEdit(edit)) return edit.start;
+  if (edit.op === "append-eof") return Number.POSITIVE_INFINITY;
+  return edit.index;
+}
+
+function editPhase(edit: PreparedEdit): number {
+  if (edit.op === "prepend") return 0;
+  if (isRangeEdit(edit)) return 1;
+  if (edit.op === "append") return 2;
+  return 3;
+}
+
+function comparePreparedEdit(a: PreparedEdit, b: PreparedEdit): number {
+  return (
+    editIndex(a) - editIndex(b) ||
+    editPhase(a) - editPhase(b) ||
+    a.order - b.order
+  );
+}
+
+function assertNoOverlappingEdits(edits: PreparedEdit[]) {
+  let rangeEnd = -1;
+  for (const edit of edits) {
+    if (edit.op !== "append-eof" && editIndex(edit) <= rangeEnd) {
+      throw new Error("[E_OVERLAP] 编辑范围不能重叠");
+    }
+    if (isRangeEdit(edit)) rangeEnd = edit.end;
+  }
+}
+
+function appendOriginalRange(
+  output: string[],
+  content: string,
+  cursor: number,
+  end: number,
+): number {
+  if (cursor < end) {
+    output.push(content.slice(cursor, end));
+  }
+  return end;
 }
 
 export function applyEdits(content: string, edits: EditOp[]): EditResult {
-  const hadTrailingNewline = content.endsWith("\n");
-  let recovered = 0;
+  const records = toLineRecords(content);
+  const prepared = edits.map((edit, order) =>
+    prepareEdit(content, records, edit, order),
+  );
+  prepared.sort(comparePreparedEdit);
+  assertNoOverlappingEdits(prepared);
 
-  const sorted = [...edits].sort((a, b) => editStartLine(a) - editStartLine(b));
-  let editIdx = 0;
-  let skipTo = 0;
+  const changes: string[] = [];
+  const output: string[] = [];
+  let cursor = 0;
+  let currentContent: string | undefined;
+  let currentLineCount = 0;
 
-  function expectedHash(anchor: string | undefined): string | null {
-    if (!anchor) return null;
-    return parseLineRef(anchor).hash;
-  }
-
-  // result 存储不含 \n 的行，最终 join("\n")
-  const result: string[] = [];
-
-  // 文件头 prepend（无 pos）
-  for (let i = 0; i < sorted.length; i++) {
-    if (sorted[i]!.op === "prepend" && !sorted[i]!.pos) {
-      result.push(...(sorted[i] as { content: string }).content.split("\n"));
-      sorted.splice(i, 1);
-      i--;
-    }
-  }
-
-  for (const hl of hashlines(content)) {
-    const [meta, raw] = hl;
-    const lineText = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
-
-    if (meta.lineNumber < skipTo) continue;
-
-    const preLines: string[] = [];
-    const postLines: string[] = [];
-    let handled = false;
-
-    while (
-      editIdx < sorted.length &&
-      editStartLine(sorted[editIdx]!) <= meta.lineNumber
-    ) {
-      const edit = sorted[editIdx]!;
-      const startLine = editStartLine(edit);
-
-      if (startLine < meta.lineNumber) {
-        editIdx++;
-        continue;
+  for (const edit of prepared) {
+    if (edit.op === "append-eof") {
+      cursor = appendOriginalRange(output, content, cursor, content.length);
+      currentContent ??= output.join("");
+      if (currentLineCount === 0) {
+        currentLineCount = contentLineCount(currentContent);
       }
-
-      if (edit.op === "replace") {
-        const posHash = expectedHash(edit.pos);
-        if (posHash && meta.hash !== posHash)
-          throw new Error(`[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`);
-        let endLine = meta.lineNumber;
-        if (edit.end) endLine = parseLineRef(edit.end).line;
-        result.push(...edit.content.split("\n"));
-        skipTo = endLine + 1;
-        handled = true;
-      } else if (edit.op === "delete") {
-        const posHash = expectedHash(edit.pos);
-        if (posHash && meta.hash !== posHash)
-          throw new Error(`[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`);
-        let endLine = meta.lineNumber;
-        if (edit.end) endLine = parseLineRef(edit.end).line;
-        skipTo = endLine + 1;
-        handled = true;
-      } else if (edit.op === "append") {
-        if (edit.pos) {
-          const posHash = expectedHash(edit.pos);
-          if (posHash && meta.hash !== posHash)
-            throw new Error(
-              `[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`,
-            );
-        }
-        postLines.push(...edit.content.split("\n"));
-      } else if (edit.op === "prepend") {
-        if (edit.pos) {
-          const posHash = expectedHash(edit.pos);
-          if (posHash && meta.hash !== posHash)
-            throw new Error(
-              `[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`,
-            );
-        }
-        preLines.push(...edit.content.split("\n"));
-      }
-
-      editIdx++;
-    }
-
-    if (handled) continue;
-
-    result.push(...preLines);
-    result.push(lineText);
-    result.push(...postLines);
-  }
-
-  // 检查未处理的 edits（锚点越界或不存在）
-  for (let i = editIdx; i < sorted.length; i++) {
-    const edit = sorted[i]!;
-    if ((edit.op === "append" || edit.op === "prepend") && !edit.pos) continue;
-    const anchor =
-      edit.op === "replace" || edit.op === "delete" ? edit.pos : edit.pos!;
-    throw new Error(`[E_NO_MATCH] 锚点 "${anchor}" 未找到或哈希不匹配`);
-  }
-
-  // 文件尾 append（无 pos）
-  for (const edit of sorted) {
-    if (edit.op === "append" && !edit.pos) {
-      result.push(...edit.content.split("\n"));
-    }
-  }
-
-  let resultStr = result.join("\n");
-  if (hadTrailingNewline && resultStr.length > 0 && !resultStr.endsWith("\n")) {
-    resultStr += "\n";
-  }
-  return { content: resultStr, recovered };
-}
-
-// ─── Streaming ──────────────────────────────────────────
-
-/** 逐行产出 hashline 格式的异步生成器，适用于大文件流式读取 */
-export async function* formatHashlineStream(
-  lines: AsyncIterable<string>,
-  startLine: number,
-): AsyncGenerator<string> {
-  let index = 0;
-  for await (const line of lines) {
-    const ln = startLine + index++;
-    yield `${String(ln)}#${computeLineHash(ln, line)}:${line}`;
-  }
-}
-
-/** 将 ripgrep 行号格式的结果转为 hashline 格式 */
-export function formatGrepAsHashline(output: string): string {
-  return output
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const m = line.match(/^([^:]+):(\d+):(.*)/);
-      if (!m) return line;
-      const file = m[1]!;
-      const ln = Number.parseInt(m[2]!, 10);
-      const text = m[3]!;
-      return `${file}:${ln}#${computeLineHash(ln, text)}:${text}`;
-    })
-    .join("\n");
-}
-
-/** 流式处理 ripgrep 输出，逐行转为 hashline 格式 */
-export async function* formatGrepAsHashlineStream(
-  lines: AsyncIterable<string>,
-): AsyncGenerator<string> {
-  for await (const raw of lines) {
-    const m = raw.match(/^([^:]+):(\d+):(.*)/);
-    if (!m) {
-      yield raw;
+      const insertedTexts = editContentLines(edit.content);
+      const insertion = insertionAtEof(currentContent, edit.content);
+      output.push(insertion);
+      appendChanged(changes, "+", currentLineCount + 1, insertedTexts);
+      currentContent += insertion;
+      currentLineCount += insertedTexts.length;
       continue;
     }
-    const file = m[1]!;
-    const ln = Number.parseInt(m[2]!, 10);
-    const text = m[3]!;
-    yield `${file}:${ln}#${computeLineHash(ln, text)}:${text}`;
+
+    if (edit.op === "prepend") {
+      cursor = appendOriginalRange(
+        output,
+        content,
+        cursor,
+        records[edit.index]!.start,
+      );
+      const line = records[edit.index]!;
+      output.push(insertionBeforeLine(edit.content));
+      appendChanged(
+        changes,
+        "+",
+        line.lineNumber,
+        editContentLines(edit.content),
+      );
+      continue;
+    }
+
+    if (edit.op === "append") {
+      cursor = appendOriginalRange(
+        output,
+        content,
+        cursor,
+        records[edit.index]!.end,
+      );
+      const line = records[edit.index]!;
+      output.push(insertionAfterLine(line.endsWithNewline, edit.content));
+      appendChanged(
+        changes,
+        "+",
+        line.lineNumber + 1,
+        editContentLines(edit.content),
+      );
+      continue;
+    }
+
+    cursor = appendOriginalRange(
+      output,
+      content,
+      cursor,
+      records[edit.start]!.start,
+    );
+    const line = records[edit.start]!;
+    const selected = joinRawRecords(content, records, edit.start, edit.end);
+    appendChanged(changes, "-", line.lineNumber, rawLineTexts(selected));
+    if (edit.op === "replace") {
+      output.push(edit.replacement);
+      appendChanged(
+        changes,
+        "+",
+        line.lineNumber,
+        rawLineTexts(edit.replacement),
+      );
+    } else if (
+      edit.end === records.length - 1 &&
+      !records[edit.end]!.endsWithNewline &&
+      output.at(-1)?.endsWith("\n")
+    ) {
+      const previous = output.pop()!;
+      output.push(previous.slice(0, -1));
+    }
+    cursor = records[edit.end]!.end;
   }
+
+  if (currentContent === undefined) {
+    appendOriginalRange(output, content, cursor, content.length);
+    currentContent = output.join("");
+  }
+
+  // 计算行号偏移：遍历已排序的 prepared，记录所有非零偏移区间
+  let currentDelta = 0;
+  let lastAfter = 0;
+  for (const edit of prepared) {
+    let delta = 0;
+    let afterLine = 0;
+    if (edit.op === "delete") {
+      delta = -(edit.end - edit.start + 1);
+      afterLine = records[edit.end]!.lineNumber;
+    } else if (edit.op === "replace") {
+      const oldCount = rawLineTexts(
+        joinRawRecords(content, records, edit.start, edit.end),
+      ).length;
+      const newCount = rawLineTexts(edit.replacement).length;
+      delta = newCount - oldCount;
+      afterLine = records[edit.end]!.lineNumber;
+    } else if (edit.op === "append") {
+      delta = rawLineTexts(edit.content).length;
+      afterLine = records[edit.index]!.lineNumber;
+    } else if (edit.op === "prepend") {
+      delta = rawLineTexts(edit.content).length;
+      afterLine = records[edit.index]!.lineNumber - 1;
+    }
+    if (delta === 0) continue;
+    const prevDelta = currentDelta;
+    currentDelta += delta;
+    if (prevDelta !== 0) {
+      const op = prevDelta > 0 ? `+ ${prevDelta}` : `- ${-prevDelta}`;
+      changes.push(`@line(>${lastAfter}, line => line ${op})`);
+    }
+    if (currentDelta !== 0) {
+      lastAfter = afterLine;
+    } else {
+      lastAfter = 0;
+    }
+  }
+  if (currentDelta !== 0 && lastAfter > 0) {
+    const op = currentDelta > 0 ? `+ ${currentDelta}` : `- ${-currentDelta}`;
+    changes.push(`@line(>${lastAfter}, line => line ${op})`);
+  }
+
+  return { content: currentContent, changed: changes.join("\n") };
 }

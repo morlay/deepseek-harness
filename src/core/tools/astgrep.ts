@@ -4,9 +4,10 @@ import { astFindInFiles } from "../../astgrep/astgrep.ts";
 
 export const astgrep = () =>
   tool({
-    description:
-      "AST 模式搜索代码结构，不受格式/空格干扰。返回 `file:line:col: text`。使用 `$NAME` 匹配标识符，`$$$NAME` 匹配多节点。\n" +
-      '示例: astgrep({ pattern: "export const $NAME = $VALUE", lang: "typescript", path: "src/" })',
+    description: `
+AST 模式搜索代码结构，不受格式/空格干扰。返回 \`file:line:col: text\`。使用 \`$NAME\` 匹配标识符，\`$$$NAME\` 匹配多节点。
+示例: astgrep(pattern: "export const $NAME = $VALUE", lang: "typescript", path: "src/")
+`.trim(),
     args: {
       pattern: tool.schema.string().meta({ description: "AST 匹配模式" }),
       lang: tool.schema
@@ -16,7 +17,7 @@ export const astgrep = () =>
       path: tool.schema
         .string()
         .optional()
-        .meta({ description: "搜索的目录或文件（相对路径）" }),
+        .meta({ description: "搜索的目录或文件" }),
     },
     async execute(args, ctx) {
       const dir = args.path ? resolve(ctx.directory, args.path) : ctx.directory;

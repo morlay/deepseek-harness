@@ -13,7 +13,7 @@ export default {
   id: "deepseek-harness",
   server: async (ctx) => {
     return {
-      config: async (config: any) => {
+      config: async (config) => {
         config.agent ??= {};
         config.agent.code = merge(config.agent.code ?? {}, { ...agents.code });
         config.agent.chat = merge(config.agent.chat ?? {}, { ...agents.chat });
@@ -21,6 +21,9 @@ export default {
         config.agent.worker = merge(config.agent.worker ?? {}, {
           ...agents.worker,
         });
+
+        // 务必关闭，与 hashline 不匹配，任务完成后或提交时，统一 format
+        config.formatter = false;
       },
       tool: {
         hashread: hashread(),

@@ -51,6 +51,8 @@ export async function createContext(opt: { pluginEnabled?: boolean } = {}) {
     },
   });
 
+  let lastLogCount = 0;
+
   return {
     close: async () => {
       oc.server.close();
@@ -99,6 +101,30 @@ export async function createContext(opt: { pluginEnabled?: boolean } = {}) {
       }
 
       return resp.data;
+    },
+
+    logStats: async () => {
+      const s = proxy.getStats(lastLogCount);
+      if (s.chats === 0) return;
+      lastLogCount = proxy.logCount;
+      const lines = [
+        `[e2e] Chats:${s.chats} Tools:${s.tools} Tokens:${s.totalPromptTokens}↑${s.totalCompletionTokens}↓ Reasoning:${s.reasoningChats}/${s.chats}`,
+      ];
+      if (Object.keys(s.toolFreq).length > 0) {
+        const freq = Object.entries(s.toolFreq)
+          .sort((a, b) => b[1] - a[1])
+          .map(([t, c]) => `${t}:${c}`)
+          .join(" ");
+        lines.push(`  Tools: ${freq}`);
+      }
+      for (const c of s.timeline) {
+        const tools = c.tools.length > 0 ? ` [${c.tools.join(", ")}]` : "";
+        const preview = c.reasoningPreview
+          ? ` "${c.reasoningPreview.slice(0, 80)}"`
+          : "";
+        lines.push(`  #${c.index}${preview}${tools}`);
+      }
+      console.log(lines.join("\n"));
     },
   };
 }

@@ -11,3 +11,4 @@ export {
 } from "./helpers.ts";
 export { analyzeLog, formatStats } from "./analyze-logs.ts";
 export type { ChatStat, LogStats } from "./analyze-logs.ts";
+export type { ProxyStats } from "./proxy.ts";

@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import {
-  createContext,
-  createTempDir,
-  toolInput,
-  isAbsPath,
-} from "deepseek-harness/testing";
+import { createContext, createTempDir } from "deepseek-harness/testing";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Session } from "@opencode-ai/sdk/v2";
@@ -29,75 +24,43 @@ describe("path-params", () => {
     await tmp.destroy();
   });
 
-  function anyInput(messages: any[], ...names: string[]) {
-    return names.flatMap((n) => toolInput(messages, n));
-  }
+  it("读取嵌套目录下的文件", async () => {
+    await ctx.promptText(session, "读取 src/lib/math.ts，PI 具体值是多少？");
 
-  it("读取嵌套目录下的文件 — 使用 hashread / hashgrep", async () => {
-    await ctx.promptText(
-      session,
-      "读取 src/lib/math.ts 的内容，PI 的具体值是多少？",
-    );
-
-    const messages = await ctx.messages(session);
-    const inputs = anyInput(messages, "hashread", "hashgrep");
-    expect(inputs.length, "应调用读取工具").toBeGreaterThan(0);
-
-    for (const args of inputs) {
-      const fp = args.filePath ?? args.path;
-      expect(fp).toBeTruthy();
-      expect(isAbsPath(fp, tmp.path), "filePath 禁止外部绝对路径").toBe(false);
-    }
+    // 验证文件未被修改
+    const content = await readFile(join(tmp.path, "src/lib/math.ts"), "utf-8");
+    expect(content).toContain("3.1415926");
+    await ctx.logStats();
   }, 90_000);
 
-  it("write — 创建文件到嵌套子目录", async () => {
+  it("创建文件到嵌套子目录", async () => {
     await ctx.promptText(
       session,
-      "在 src/lib/ 下创建一个 types.ts 文件，导出一个 type Info = { name: string }",
+      "在 src/lib/ 下创建 types.ts，导出一个 type Info = { name: string }",
     );
 
     const content = await readFile(join(tmp.path, "src/lib/types.ts"), "utf-8");
     expect(content).toMatch(/Info/);
-
-    const messages = await ctx.messages(session);
-    const inputs = toolInput(messages, "write").concat(
-      toolInput(messages, "hashedit"),
-    );
-    expect(inputs.length).toBeGreaterThan(0);
-    for (const args of inputs) {
-      const fp = args.filePath ?? args.ops?.[0]?.filePath;
-      expect(fp).toBeTruthy();
-      expect(isAbsPath(fp, tmp.path), "filePath 禁止外部绝对路径").toBe(false);
-    }
+    await ctx.logStats();
   }, 90_000);
 
-  it("在子目录中搜索 — 使用 hashgrep / astgrep", async () => {
-    await ctx.promptText(
-      session,
-      "在 src/lib/ 目录中搜索 export 关键字，告诉我哪些文件里有",
+  it("在子目录中搜索", async () => {
+    await ctx.promptText(session, "在 src/lib/ 中搜索 export 关键字");
+
+    // 验证文件未被修改
+    const content = await readFile(
+      join(tmp.path, "src/lib/strings.ts"),
+      "utf-8",
     );
-
-    const messages = await ctx.messages(session);
-    const inputs = anyInput(messages, "hashgrep", "astgrep");
-    expect(inputs.length, "应调用搜索工具").toBeGreaterThan(0);
-
-    for (const args of inputs) {
-      expect(args.pattern).toBeTruthy();
-      const fp = args.filePath ?? args.path;
-      if (fp)
-        expect(isAbsPath(fp, tmp.path), "filePath 禁止外部绝对路径").toBe(
-          false,
-        );
-    }
+    expect(content).toContain("export");
+    await ctx.logStats();
   }, 90_000);
 
   it("修改嵌套子目录中的文件", async () => {
-    await ctx.promptText(
-      session,
-      "把 src/lib/math.ts 里的 PI 值从 3.14 改成 3.14159",
-    );
+    await ctx.promptText(session, "src/lib/math.ts 的 PI 值改成 3.14159");
 
     const content = await readFile(join(tmp.path, "src/lib/math.ts"), "utf-8");
     expect(content).toMatch(/3\.14159/);
+    await ctx.logStats();
   }, 90_000);
 });

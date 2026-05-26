@@ -41,6 +41,7 @@ export const greet = (name: string) => \`Hello \${name}\`
 
     const messages = await ctx.messages(session);
     expect(toolsCalled(messages, "astgrep")).toBeGreaterThan(0);
+    await ctx.logStats();
   }, 90_000);
 
   it("astedit dryRun 预览后执行 const → let 重构", async () => {
@@ -54,5 +55,6 @@ export const greet = (name: string) => \`Hello \${name}\`
     expect(content).toContain("let E");
     expect(content).not.toMatch(/const PI/);
     expect(content).not.toMatch(/const E/);
+    await ctx.logStats();
   }, 120_000);
 });

@@ -1,13 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   computeLineHash,
-  formatHashlineRegion,
   parseLineRef,
   formatFileAsHashline,
-  stripHashline,
   applyEdits,
-  formatHashlineStream,
-  lines,
 } from "../index.ts";
 
 describe("computeLineHash", () => {
@@ -48,24 +44,6 @@ describe("computeLineHash", () => {
   });
 });
 
-describe("formatHashlineRegion", () => {
-  it("格式化为 LINE#HASH:CONTENT", () => {
-    const result = formatHashlineRegion(["const x = 1;", "const y = 2;"], 1);
-    const lines = result.split("\n");
-    expect(lines[0]).toMatch(/^1#[A-Z]{2}:const x = 1;$/);
-    expect(lines[1]).toMatch(/^2#[A-Z]{2}:const y = 2;$/);
-  });
-
-  it("行号对齐", () => {
-    const result = formatHashlineRegion(["line"], 10);
-    expect(result).toMatch(/^10#[A-Z]{2}:line$/);
-  });
-
-  it("空数组返回空字符串", () => {
-    expect(formatHashlineRegion([], 1)).toBe("");
-  });
-});
-
 describe("parseLineRef", () => {
   it("解析 LINE#HASH 格式", () => {
     const ref = parseLineRef("5#MQ");
@@ -79,6 +57,12 @@ describe("parseLineRef", () => {
     expect(ref.hash).toBe("ZZ");
   });
 
+  it("支持 diff 风格前缀", () => {
+    const ref = parseLineRef("+  7#AB");
+    expect(ref.line).toBe(7);
+    expect(ref.hash).toBe("AB");
+  });
+
   it("不接受行号外的字符前缀", () => {
     expect(() => parseLineRef("abc#ZZ")).toThrow(/E_BAD_REF/);
   });
@@ -90,55 +74,88 @@ describe("parseLineRef", () => {
 
 describe("formatFileAsHashline", () => {
   it("完整文件转为 hashline 格式", () => {
-    const result = formatFileAsHashline("hello\nworld\n");
+    const result = formatFileAsHashline(`hello
+world
+`);
     const lines = result.split("\n");
     expect(lines[0]).toMatch(/^1#[A-Z]{2}:hello$/);
     expect(lines[1]).toMatch(/^2#[A-Z]{2}:world$/);
   });
 
   it("无尾换行仍正确", () => {
-    const result = formatFileAsHashline("hello\nworld");
+    const result = formatFileAsHashline(`hello
+world`);
     const lines = result.split("\n");
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^1#[A-Z]{2}:hello$/);
   });
-});
 
-describe("stripHashline", () => {
-  it("剥除 hashline 前缀", () => {
-    expect(stripHashline(" 1#AB:hello")).toBe("hello");
-    expect(stripHashline("10#CD:world")).toBe("world");
+  it("跳过纯空行但保留物理行号", () => {
+    const result = formatFileAsHashline(`hello
+
+world
+`);
+    const lines = result.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^1#[A-Z]{2}:hello$/);
+    expect(lines[1]).toMatch(/^3#[A-Z]{2}:world$/);
+    expect(result).not.toMatch(/^2#/m);
   });
 
-  it("多行处理", () => {
-    const input = " 1#AB:a\n 2#CD:b\n 3#EF:c";
-    expect(stripHashline(input)).toBe("a\nb\nc");
+  it("CRLF 纯空行同样跳过且不输出回车符", () => {
+    const result = formatFileAsHashline("hello\r\n\r\nworld\r\n");
+    const lines = result.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^1#[A-Z]{2}:hello$/);
+    expect(lines[1]).toMatch(/^3#[A-Z]{2}:world$/);
+    expect(result).not.toContain("\r");
+  });
+
+  it("只跳过真正空行，不跳过空白字符行", () => {
+    const result = formatFileAsHashline("hello\n  \nworld\n");
+    const lines = result.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(/^2#[A-Z]{2}:  $/);
   });
 });
 
 describe("applyEdits", () => {
   it("replace 单行替换", () => {
-    const content = "line1\nline2\nline3\n";
+    const content = `line1
+line2
+line3
+`;
     const anchor = "2#" + computeLineHash(2, "line2");
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, content: "NEW2" },
+      { op: "replace", pos: anchor, oldStr: "line2", newStr: "NEW2" },
     ]);
     expect(result.content).toBe("line1\nNEW2\nline3\n");
-    expect(result.recovered).toBe(0);
+    expect(result.changed.split("\n")).toEqual([
+      `-2#${computeLineHash(2, "line2")}`,
+      `+2#${computeLineHash(2, "NEW2")}`,
+    ]);
   });
 
   it("replace 范围替换", () => {
-    const content = "a\nb\nc\nd\ne\n";
+    const content = `a
+b
+c
+d
+e
+`;
     const start = "2#" + computeLineHash(2, "b");
     const end = "4#" + computeLineHash(4, "d");
     const result = applyEdits(content, [
-      { op: "replace", pos: start, end, content: "X\nY" },
+      { op: "replace", pos: start, end, oldStr: "b\nc\nd", newStr: "X\nY" },
     ]);
     expect(result.content).toBe("a\nX\nY\ne\n");
   });
 
   it("append 在锚点后追加", () => {
-    const content = "a\nb\nc\n";
+    const content = `a
+b
+c
+`;
     const anchor = "2#" + computeLineHash(2, "b");
     const result = applyEdits(content, [
       { op: "append", pos: anchor, content: "b2" },
@@ -146,13 +163,34 @@ describe("applyEdits", () => {
     expect(result.content).toBe("a\nb\nb2\nc\n");
   });
 
+  it("同一锚点多次 prepend/append 保持顺序", () => {
+    const content = `core
+`;
+    const anchor = `1#${computeLineHash(1, "core")}`;
+    const result = applyEdits(content, [
+      { op: "append", pos: anchor, content: "after1" },
+      { op: "append", pos: anchor, content: "after2" },
+      { op: "prepend", pos: anchor, content: "before1" },
+      { op: "prepend", pos: anchor, content: "before2" },
+    ]);
+    expect(result.content).toBe("before1\nbefore2\ncore\nafter1\nafter2\n");
+  });
+
   it("append 无锚点时追加到文件末尾", () => {
-    const result = applyEdits("a\nb\n", [{ op: "append", content: "c" }]);
+    const result = applyEdits(
+      `a
+b
+`,
+      [{ op: "append", content: "c" }],
+    );
     expect(result.content).toBe("a\nb\nc\n");
   });
 
   it("prepend 在锚点前插入", () => {
-    const content = "a\nb\nc\n";
+    const content = `a
+b
+c
+`;
     const anchor = "2#" + computeLineHash(2, "b");
     const result = applyEdits(content, [
       { op: "prepend", pos: anchor, content: "beforeB" },
@@ -160,20 +198,23 @@ describe("applyEdits", () => {
     expect(result.content).toBe("a\nbeforeB\nb\nc\n");
   });
 
-  it("prepend 无锚点时插入到文件开头", () => {
-    const result = applyEdits("a\nb\n", [{ op: "prepend", content: "header" }]);
-    expect(result.content).toBe("header\na\nb\n");
-  });
-
   it("delete 删除单行", () => {
-    const content = "keep\nremove\nkeep\n";
+    const content = `keep
+remove
+keep
+`;
     const anchor = "2#" + computeLineHash(2, "remove");
     const result = applyEdits(content, [{ op: "delete", pos: anchor }]);
     expect(result.content).toBe("keep\nkeep\n");
   });
 
   it("delete 范围删除", () => {
-    const content = "a\nb\nc\nd\ne\n";
+    const content = `a
+b
+c
+d
+e
+`;
     const start = "2#" + computeLineHash(2, "b");
     const end = "4#" + computeLineHash(4, "d");
     const result = applyEdits(content, [{ op: "delete", pos: start, end }]);
@@ -181,33 +222,46 @@ describe("applyEdits", () => {
   });
 
   it("多操作批量应用（从后往前）", () => {
-    const content = "1\n2\n3\n4\n5\n";
+    const content = `1
+2
+3
+4
+5
+`;
     const a2 = "2#" + computeLineHash(2, "2");
     const a4 = "4#" + computeLineHash(4, "4");
     const result = applyEdits(content, [
-      { op: "replace", pos: a2, content: "TWO" },
+      { op: "replace", pos: a2, oldStr: "2", newStr: "TWO" },
       { op: "delete", pos: a4 },
     ]);
     expect(result.content).toBe("1\nTWO\n3\n5\n");
   });
 
   it("锚点哈希不匹配 throw", () => {
-    const content = "hello\n";
+    const content = `hello
+`;
     expect(() =>
-      applyEdits(content, [{ op: "replace", pos: "1#XX", content: "x" }]),
+      applyEdits(content, [
+        { op: "replace", pos: "1#XX", oldStr: "hello", newStr: "x" },
+      ]),
     ).toThrow(/E_NO_MATCH/);
   });
 
   it("锚点行号越界 throw", () => {
-    const content = "hello\n";
+    const content = `hello
+`;
     expect(() =>
-      applyEdits(content, [{ op: "replace", pos: "99#XX", content: "x" }]),
+      applyEdits(content, [
+        { op: "replace", pos: "99#XX", oldStr: "hello", newStr: "x" },
+      ]),
     ).toThrow(/E_NO_MATCH/);
   });
 
   it("空文件 replace 报错", () => {
     expect(() =>
-      applyEdits("", [{ op: "replace", pos: "1#XX", content: "x" }]),
+      applyEdits("", [
+        { op: "replace", pos: "1#XX", oldStr: "hello", newStr: "x" },
+      ]),
     ).toThrow(/E_NO_MATCH/);
   });
 
@@ -216,100 +270,100 @@ describe("applyEdits", () => {
     expect(result.content).toBe("hello");
   });
 
-  it("空文件 prepend 无锚点可创建内容", () => {
-    const result = applyEdits("", [{ op: "prepend", content: "hello" }]);
-    expect(result.content).toBe("hello");
-  });
-
   it("尾换行保持一致性", () => {
     // 原始有尾换行 → 结果也应有
-    const r1 = applyEdits("a\nb\n", [
-      { op: "delete", pos: "2#" + computeLineHash(2, "b") },
-    ]);
-    expect(r1.content).toBe("a\n");
+    const r1 = applyEdits(
+      `a
+b
+`,
+      [{ op: "delete", pos: "2#" + computeLineHash(2, "b") }],
+    );
+    expect(r1.content).toBe(`a
+`);
     // 原始无尾换行 → 结果也应无
-    const r2 = applyEdits("a\nb", [
-      { op: "delete", pos: "2#" + computeLineHash(2, "b") },
-    ]);
+    const r2 = applyEdits(
+      `a
+b`,
+      [{ op: "delete", pos: "2#" + computeLineHash(2, "b") }],
+    );
     expect(r2.content).toBe("a");
   });
 
   it("内容含字面 \\\\n 不被 split 误断", () => {
-    const content = "col1\\ncol2\n";
+    const content = `col1\\ncol2
+`;
     const anchor = "1#" + computeLineHash(1, "col1\\ncol2");
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, content: "new" },
+      { op: "replace", pos: anchor, oldStr: "col1\\ncol2", newStr: "new" },
     ]);
     expect(result.content).toBe("new\n");
   });
 
   it("内容含字面 \\\\n 的多行替换", () => {
-    const content = "a\\nb\nc\n";
+    const content = `a\\nb
+c
+`;
     const anchor = "1#" + computeLineHash(1, "a\\nb");
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, content: "X\\nY" },
+      { op: "replace", pos: anchor, oldStr: "a\\nb", newStr: "X\\nY" },
     ]);
     expect(result.content).toBe("X\\nY\nc\n");
   });
-});
 
-describe("lines", () => {
-  it("空字符串不产出行", () => {
-    expect([...lines("")]).toEqual([]);
+  it("返回 changed: replace 产生 -/+ 行", () => {
+    const content = `a
+b
+`;
+    const anchor = `2#${computeLineHash(2, "b")}`;
+    const result = applyEdits(content, [
+      { op: "replace", pos: anchor, oldStr: "b", newStr: "c" },
+    ]);
+    expect(result.changed.split("\n")).toEqual([
+      `-2#${computeLineHash(2, "b")}`,
+      `+2#${computeLineHash(2, "c")}`,
+    ]);
   });
 
-  it("单行无换行不附带 \\n", () => {
-    expect([...lines("hello")]).toEqual(["hello"]);
+  it("返回 changed: delete 产生 - 行", () => {
+    const content = `a
+b
+c
+`;
+    const anchor = `2#${computeLineHash(2, "b")}`;
+    const result = applyEdits(content, [{ op: "delete", pos: anchor }]);
+    expect(result.changed.split("\n")).toEqual([
+      `-2#${computeLineHash(2, "b")}`,
+      "@line(>2, line => line - 1)",
+    ]);
   });
 
-  it("单行有换行附带 \\n", () => {
-    expect([...lines("hello\n")]).toEqual(["hello\n"]);
+  it("返回 changed: append 产生 + 行", () => {
+    const content = `a
+b
+`;
+    const anchor = `2#${computeLineHash(2, "b")}`;
+    const result = applyEdits(content, [
+      { op: "append", pos: anchor, content: "c" },
+    ]);
+    expect(result.changed.split("\n")).toEqual([
+      `+3#${computeLineHash(3, "c")}`,
+      "@line(>2, line => line + 1)",
+    ]);
   });
 
-  it("多行保留每行 \\n", () => {
-    expect([...lines("a\nb\nc\n")]).toEqual(["a\n", "b\n", "c\n"]);
-  });
+  it("返回 changed 时跳过纯空行", () => {
+    const content = `a
 
-  it("字面 \\\\n 不被当作换行符", () => {
-    expect([...lines("a\\nb\n")]).toEqual(["a\\nb\n"]);
-  });
-
-  it("精确重建用 join('')", () => {
-    const input = "a\nb\nc\n";
-    expect([...lines(input)].join("")).toBe(input);
-  });
-});
-
-describe("formatHashlineStream", () => {
-  async function* toAsyncIterable(lines: string[]): AsyncIterable<string> {
-    for (const line of lines) yield line;
-  }
-
-  it("流式产出行号对齐的 hashline", async () => {
-    const lines = toAsyncIterable(["hello", "world"]);
-    const results: string[] = [];
-    for await (const hl of formatHashlineStream(lines, 1)) {
-      results.push(hl);
-    }
-    expect(results[0]).toMatch(/^1#[A-Z]{2}:hello$/);
-    expect(results[1]).toMatch(/^2#[A-Z]{2}:world$/);
-  });
-
-  it("startLine 偏移正确", async () => {
-    const lines = toAsyncIterable(["x"]);
-    const results: string[] = [];
-    for await (const hl of formatHashlineStream(lines, 42)) {
-      results.push(hl);
-    }
-    expect(results[0]).toMatch(/^42#[A-Z]{2}:x$/);
-  });
-
-  it("空流不产生输出", async () => {
-    const lines = toAsyncIterable([]);
-    const results: string[] = [];
-    for await (const hl of formatHashlineStream(lines, 1)) {
-      results.push(hl);
-    }
-    expect(results).toEqual([]);
+b
+`;
+    const start = `1#${computeLineHash(1, "a")}`;
+    const end = `3#${computeLineHash(3, "b")}`;
+    const result = applyEdits(content, [{ op: "delete", pos: start, end }]);
+    expect(result.changed.split("\n")).toEqual([
+      `-1#${computeLineHash(1, "a")}`,
+      `-3#${computeLineHash(3, "b")}`,
+      "@line(>3, line => line - 3)",
+    ]);
+    expect(result.changed).not.toMatch(/^-2#/m);
   });
 });

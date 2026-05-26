@@ -24,7 +24,7 @@ async function setupDir() {
     abort: new AbortController().signal,
   } as TC;
   const r = async (fp: string) => {
-    const res = await hashread().execute({ filePath: fp }, ctx);
+    const res = await hashread().execute({ filePath: fp, limit: 100 }, ctx);
     return typeof res === "string" ? res : res.output;
   };
   const e = async (ops: any[]) => {
@@ -42,7 +42,9 @@ describe("hashline 编辑闭环", () => {
     const { pf, rf, e, g } = await setupDir();
     await pf(
       "src/utils.ts",
-      "export const add = (a, b) => a + b;\nexport const subtract = (a, b) => a - b;\n",
+      `export const add = (a, b) => a + b;
+export const subtract = (a, b) => a - b;
+`,
     );
 
     const grepResult = await g("subtract");
@@ -57,7 +59,8 @@ describe("hashline 编辑闭环", () => {
           {
             op: "replace",
             pos: anchor,
-            content: "export const minus = (a, b) => a - b;",
+            oldStr: "export const subtract = (a, b) => a - b;",
+            newStr: "export const minus = (a, b) => a - b;",
           },
         ],
       },
@@ -70,7 +73,12 @@ describe("hashline 编辑闭环", () => {
 
   it("read 获取锚点 → 批量替换两行", async () => {
     const { pf, rf, r, e } = await setupDir();
-    await pf("config.ts", "const host = 'localhost';\nconst port = 3000;\n");
+    await pf(
+      "config.ts",
+      `const host = 'localhost';
+const port = 3000;
+`,
+    );
 
     const readResult = await r("config.ts");
     const lines = readResult.split("\n");
@@ -81,8 +89,18 @@ describe("hashline 编辑闭环", () => {
       {
         filePath: "config.ts",
         edits: [
-          { op: "replace", pos: anchor1, content: "const host = '0.0.0.0';" },
-          { op: "replace", pos: anchor2, content: "const port = 8080;" },
+          {
+            op: "replace",
+            pos: anchor1,
+            oldStr: "const host = 'localhost';",
+            newStr: "const host = '0.0.0.0';",
+          },
+          {
+            op: "replace",
+            pos: anchor2,
+            oldStr: "const port = 3000;",
+            newStr: "const port = 8080;",
+          },
         ],
       },
     ]);
@@ -92,19 +110,81 @@ describe("hashline 编辑闭环", () => {
     expect(content).toContain("8080");
   });
 
-  it("append 在锚点后追加, prepend 在文件头插入", async () => {
+  it("hashread offset/limit 按物理行窗口读取", async () => {
+    const { pf, ctx } = await setupDir();
+    await pf(
+      "window.txt",
+      `l1
+
+l3
+l4
+l5
+`,
+    );
+    const res = await hashread().execute(
+      { filePath: "window.txt", offset: 2, limit: 3 },
+      ctx,
+    );
+    const output = typeof res === "string" ? res : res.output;
+    expect(output).not.toContain("1#");
+    expect(output).toContain("3#");
+    expect(output).toContain("4#");
+    expect(output).not.toContain("5#");
+  });
+
+  it("hashgrep 跨文件返回完整文件块", async () => {
+    const { pf, ctx } = await setupDir();
+    await pf(
+      "a.txt",
+      `match one
+match two
+`,
+    );
+    await pf(
+      "b.txt",
+      `match three
+match four
+`,
+    );
+    const res = await hashgrep().execute({ pattern: "match" }, ctx);
+    const output = typeof res === "string" ? res : res.output;
+    const matchedLines = output
+      .split("\n")
+      .filter((line) => line.includes("#") && line.includes(":match"));
+    expect(matchedLines).toHaveLength(4);
+    expect(output).toContain("a.txt");
+    expect(output).toContain("b.txt");
+  });
+
+  it("hashgrep 拒绝空 pattern", async () => {
+    const { ctx } = await setupDir();
+    await expect(hashgrep().execute({ pattern: "" }, ctx)).rejects.toThrow(
+      /pattern 不能为空/,
+    );
+  });
+
+  it("append 在锚点后追加, prepend 在锚点前插入", async () => {
     const { pf, rf, r, e } = await setupDir();
-    await pf("items.txt", "item1\nitem2\nitem3\n");
+    await pf(
+      "items.txt",
+      `item1
+item2
+item3
+`,
+    );
 
     const readResult = await r("items.txt");
-    const anchor = readResult.split("\n")[2]!.match(/^(\d+#[A-Z]{2})/)![1]!;
+    const firstAnchor = readResult
+      .split("\n")[0]!
+      .match(/^(\d+#[A-Z]{2})/)![1]!;
+    const lastAnchor = readResult.split("\n")[2]!.match(/^(\d+#[A-Z]{2})/)![1]!;
 
     await e([
       {
         filePath: "items.txt",
         edits: [
-          { op: "append", pos: anchor, content: "item4" },
-          { op: "prepend", content: "header" },
+          { op: "append", pos: lastAnchor, content: "item4" },
+          { op: "prepend", pos: firstAnchor, content: "header" },
         ],
       },
     ]);
@@ -116,7 +196,13 @@ describe("hashline 编辑闭环", () => {
 
   it("delete 删除行", async () => {
     const { pf, rf, r, e } = await setupDir();
-    await pf("del.txt", "keep\nremove\nkeep\n");
+    await pf(
+      "del.txt",
+      `keep
+remove
+keep
+`,
+    );
 
     const readResult = await r("del.txt");
     const anchor = readResult.split("\n")[1]!.match(/^(\d+#[A-Z]{2})/)![1]!;
@@ -128,13 +214,13 @@ describe("hashline 编辑闭环", () => {
     expect(content.split("\n").filter(Boolean)).toHaveLength(2);
   });
 
-  it("新建文件：无锚点 append/prepend", async () => {
+  it("新建文件：无锚点 append", async () => {
     const { rf, e } = await setupDir();
     await e([
       {
         filePath: "new.txt",
         edits: [
-          { op: "prepend", content: "header" },
+          { op: "append", content: "header" },
           { op: "append", content: "footer" },
         ],
       },
@@ -144,37 +230,48 @@ describe("hashline 编辑闭环", () => {
     expect(content).toMatch(/footer/);
   });
 
-  it("新建文件：无效锚点 append 等同无锚点，可创建文件", async () => {
-    const { rf, e } = await setupDir();
-    await e([
-      {
-        filePath: "end.txt",
-        edits: [{ op: "append", pos: "end", content: "done=true" }],
-      },
-    ]);
-    const content = await rf("end.txt");
-    expect(content).toBe("done=true");
+  it("无效锚点不会被降级为无锚点", async () => {
+    const { e } = await setupDir();
+    await expect(
+      e([
+        {
+          filePath: "end.txt",
+          edits: [{ op: "append", pos: "end", content: "done=true" }],
+        },
+      ]),
+    ).rejects.toThrow(/E_BAD_REF/);
   });
   it("跨文件批量编辑：一次调用改多文件", async () => {
     const { pf, rf, g, e } = await setupDir();
     await pf(
       "src/utils.ts",
-      `export const add = (a, b) => a + b\nexport const sub = (a, b) => a - b\n`,
+      `export const add = (a, b) => a + b
+export const sub = (a, b) => a - b
+`,
     );
     await pf(
       "src/app.ts",
-      `import { add, sub } from "./utils"\nconst r = sub(10, 5)\n`,
+      `import { add, sub } from "./utils"
+const r = sub(10, 5)
+`,
     );
     await pf(
       "src/lib/calc.ts",
-      `import { sub } from "../utils"\nexport const x = sub(100, 30)\n`,
+      `import { sub } from "../utils"
+export const x = sub(100, 30)
+`,
     );
 
     const grepResult = await g("\\bsub\\b");
     const anchors: { file: string; pos: string }[] = [];
+    let currentFile = "";
     for (const line of grepResult.split("\n")) {
-      const m = line.match(/^([^:]+):(\d+#[A-Z]{2}):/);
-      if (m) anchors.push({ file: m[1]!, pos: m[2]! });
+      const m = line.match(/^(\d+#[A-Z]{2}):/);
+      if (m) {
+        anchors.push({ file: currentFile, pos: m[1]! });
+      } else if (line) {
+        currentFile = line;
+      }
     }
     expect(anchors.length).toBe(5);
 
@@ -185,10 +282,15 @@ describe("hashline 编辑闭环", () => {
       grouped.get(a.file)!.push(a.pos);
     }
 
-    // 一次批量调用：每文件一条 replace，pos 用数组
+    // 一次批量调用：每个锚点一条 replace
     const calls = [...grouped.entries()].map(([filePath, positions]) => ({
       filePath,
-      edits: [{ op: "replace" as const, pos: positions, content: "REPLACED" }],
+      edits: positions.map((pos) => ({
+        op: "replace" as const,
+        pos,
+        oldStr: "sub",
+        newStr: "REPLACED",
+      })),
     }));
 
     await e(calls);
@@ -202,7 +304,11 @@ describe("hashline 编辑闭环", () => {
 
   it("rename 重命名文件", async () => {
     const { pf, rf, e } = await setupDir();
-    await pf("old-name.ts", "export const x = 1;\n");
+    await pf(
+      "old-name.ts",
+      `export const x = 1;
+`,
+    );
 
     await e([{ filePath: "old-name.ts", rename: "new-name.ts" }]);
 
@@ -222,9 +328,21 @@ describe("hashline 编辑闭环", () => {
 
   it("跨文件混合操作：编辑 + 删除 + 重命名", async () => {
     const { pf, rf, r, e } = await setupDir();
-    await pf("keep.ts", "export const a = 1;\n");
-    await pf("remove.ts", "export const b = 2;\n");
-    await pf("old.ts", "export const c = 3;\n");
+    await pf(
+      "keep.ts",
+      `export const a = 1;
+`,
+    );
+    await pf(
+      "remove.ts",
+      `export const b = 2;
+`,
+    );
+    await pf(
+      "old.ts",
+      `export const c = 3;
+`,
+    );
 
     // 读取 keep.ts 获取第一行锚点
     const readResult = await r("keep.ts");
@@ -234,7 +352,12 @@ describe("hashline 编辑闭环", () => {
       {
         filePath: "keep.ts",
         edits: [
-          { op: "replace", pos: anchor, content: "export const a = 999;" },
+          {
+            op: "replace",
+            pos: anchor,
+            oldStr: "export const a = 1;",
+            newStr: "export const a = 999;",
+          },
         ],
       },
       { filePath: "remove.ts", delete: true },
@@ -263,4 +386,108 @@ describe("hashline 编辑闭环", () => {
     expect(oldExists).toBe(false);
     expect(await rf("new.ts")).toContain("export const c = 3");
   });
+});
+
+// 复现：批量创建含语法错误的 .ts 文件后锚点是否仍然可用
+it("hashedit 批量创建 .ts 文件后，锚点仍可用于后续编辑", async () => {
+  const { rf, e, r } = await setupDir();
+
+  // 批量创建 3 个 .ts 文件，其中一个描述含未转义双引号（语法错误）
+  await e([
+    {
+      filePath: "src/a.ts",
+      edits: [
+        {
+          op: "append" as const,
+          content: `
+export const a = () => ({
+  description: "包含未转义: "x"",
+})
+`.trim(),
+        },
+      ],
+    },
+    {
+      filePath: "src/b.ts",
+      edits: [
+        {
+          op: "append" as const,
+          content: `export const b = 1;
+`,
+        },
+      ],
+    },
+    {
+      filePath: "src/c.ts",
+      edits: [
+        {
+          op: "append" as const,
+          content: `export const c = 2;
+`,
+        },
+      ],
+    },
+  ]);
+
+  // 通过 hashread 获取 a.ts 的锚点
+  const readResult = await r("src/a.ts");
+  const anchor = readResult.split("\n")[0]!.match(/^(\d+#[A-Z]{2})/)![1]!;
+
+  // 用该锚点做 replace
+  await e([
+    {
+      filePath: "src/a.ts",
+      edits: [
+        {
+          op: "replace" as const,
+          pos: anchor,
+          oldStr: "export const a = () => ({",
+          newStr: "export const a = 99;",
+        },
+      ],
+    },
+  ]);
+
+  const content = await rf("src/a.ts");
+  expect(content).toContain("export const a = 99");
+});
+
+// 复现：外部 readFile 读取文件后锚点是否漂移
+it("外部 readFile 读取文件后，锚点不漂移", async () => {
+  const { pf, rf, r, e } = await setupDir();
+
+  await pf(
+    "src/grep.ts",
+    `
+export const grep = (ctx) => ({
+  description:
+    "受 \`.gitignore\` 影响，示例: grep(pattern:\\"x\\", include:\\"*.ts\\")",
+})
+`.trim(),
+  );
+
+  const readResult = await r("src/grep.ts");
+  const anchor = readResult.split("\n")[2]!.match(/^(\d+#[A-Z]{2})/)![1]!;
+
+  // 模拟 oxlint 读取该文件（readFile 但不修改）
+  await rf("src/grep.ts");
+
+  // 用锚点修改，将双引号改为单引号
+  await e([
+    {
+      filePath: "src/grep.ts",
+      edits: [
+        {
+          op: "replace" as const,
+          pos: anchor,
+          oldStr: `    "受 \`.gitignore\` 影响，示例: grep(pattern:\\"x\\", include:\\"*.ts\\")",`,
+          newStr: `    "受 \`.gitignore\` 影响，示例: grep(pattern:'x', include:'*.ts')",`,
+        },
+      ],
+    },
+  ]);
+
+  const content = await rf("src/grep.ts");
+  expect(content).toContain("grep(pattern:'x'");
+  expect(content).not.toContain(`grep(pattern:\\"x\\"`);
 });
