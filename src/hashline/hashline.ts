@@ -63,9 +63,9 @@ export function formatFileAsHashline(content: string): string {
 // ─── Edit ────────────────────────────────────────────────
 
 export type EditOp =
-  | { op: "replace"; pos: string; end?: string; lines: string[] }
-  | { op: "append"; pos?: string; lines: string[] }
-  | { op: "prepend"; pos?: string; lines: string[] }
+  | { op: "replace"; pos: string; end?: string; content: string }
+  | { op: "append"; pos?: string; content: string }
+  | { op: "prepend"; pos?: string; content: string }
   | { op: "delete"; pos: string; end?: string };
 
 export interface EditResult {
@@ -81,131 +81,162 @@ export function stripHashline(text: string): string {
     .join("\n");
 }
 
-/** 归一化行数组：尾换行不产生空尾元素 */
-function getLines(content: string): string[] {
-  const lines = content.split("\n");
-  if (content.endsWith("\n") && lines.length > 0) lines.pop();
-  return lines;
+/**
+ * 类似 Go strings.Lines：保留每行末尾 \n 的行迭代器。
+ * 空字符串不产出任何行。最后一行若不以 \n 结尾则不附带 \n。
+ * 精确重建原始字符串用 join("")。
+ */
+export function* lines(content: string): Generator<string> {
+  let remaining = content;
+  while (remaining.length > 0) {
+    const i = remaining.indexOf("\n");
+    if (i >= 0) {
+      yield remaining.slice(0, i + 1); // 包含 \n
+      remaining = remaining.slice(i + 1);
+    } else {
+      yield remaining; // 最后一行，不带 \n
+      remaining = "";
+    }
+  }
 }
 
-function resolveAnchor(
+/** 类似 Go strings.Lines + 附上行号和哈希，一次遍历。 */
+export function* hashlines(
   content: string,
-  anchor: string,
-): { lineNumber: number } | null {
-  const { line, hash } = parseLineRef(anchor);
-  const fileLines = getLines(content);
-  if (line < 1 || line > fileLines.length) return null;
-  const actualLine = fileLines[line - 1]!;
-  if (computeLineHash(line, actualLine) !== hash) return null;
-  return { lineNumber: line };
+): Generator<[{ lineNumber: number; hash: string }, string]> {
+  let lineNumber = 1;
+  for (const raw of lines(content)) {
+    const lineContent = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
+    yield [{ lineNumber, hash: computeLineHash(lineNumber, lineContent) }, raw];
+    lineNumber++;
+  }
+}
+
+function editStartLine(edit: EditOp): number {
+  if (edit.op === "replace" || edit.op === "delete") {
+    return parseLineRef(edit.pos).line;
+  }
+  if (edit.pos) {
+    return parseLineRef(edit.pos).line;
+  }
+  return edit.op === "append" ? Infinity : 0;
 }
 
 export function applyEdits(content: string, edits: EditOp[]): EditResult {
-  let result = content;
-  let recovered = 0;
   const hadTrailingNewline = content.endsWith("\n");
+  let recovered = 0;
 
-  const sorted = [...edits].sort((a, b) => {
-    const aLine =
-      a.op === "replace" || a.op === "delete"
-        ? (resolveAnchor(content, a.pos)?.lineNumber ?? 0)
-        : a.op === "append" || a.op === "prepend"
-          ? a.pos
-            ? (resolveAnchor(content, a.pos)?.lineNumber ?? 0)
-            : a.op === "append"
-              ? Infinity
-              : 0
-          : 0;
-    const bLine =
-      b.op === "replace" || b.op === "delete"
-        ? (resolveAnchor(content, b.pos)?.lineNumber ?? 0)
-        : b.op === "append" || b.op === "prepend"
-          ? b.pos
-            ? (resolveAnchor(content, b.pos)?.lineNumber ?? 0)
-            : b.op === "append"
-              ? Infinity
-              : 0
-          : 0;
-    return bLine - aLine;
-  });
+  const sorted = [...edits].sort((a, b) => editStartLine(a) - editStartLine(b));
+  let editIdx = 0;
+  let skipTo = 0;
 
-  for (const edit of sorted) {
-    const fileLines = getLines(result);
+  function expectedHash(anchor: string | undefined): string | null {
+    if (!anchor) return null;
+    return parseLineRef(anchor).hash;
+  }
 
-    switch (edit.op) {
-      case "replace": {
-        const resolved = resolveAnchor(result, edit.pos);
-        if (!resolved)
-          throw new Error(`[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`);
-        let endLine = resolved.lineNumber;
-        if (edit.end) {
-          const er = resolveAnchor(result, edit.end);
-          if (!er)
-            throw new Error(
-              `[E_NO_MATCH] 锚点 "${edit.end}" 未找到或哈希不匹配`,
-            );
-          endLine = er.lineNumber;
-        }
-        result = [
-          ...fileLines.slice(0, resolved.lineNumber - 1),
-          ...edit.lines,
-          ...fileLines.slice(endLine),
-        ].join("\n");
-        break;
-      }
-      case "append":
-      case "prepend": {
-        if (edit.lines.length === 0) break;
-        if (!edit.pos) {
-          if (edit.op === "append") {
-            if (result.length === 0) result = edit.lines.join("\n");
-            else if (result.endsWith("\n")) result += edit.lines.join("\n");
-            else result += "\n" + edit.lines.join("\n");
-          } else {
-            if (result.length === 0) result = edit.lines.join("\n");
-            else result = edit.lines.join("\n") + "\n" + result;
-          }
-          break;
-        }
-        const resolved = resolveAnchor(result, edit.pos);
-        if (!resolved)
-          throw new Error(`[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`);
-        const idx =
-          edit.op === "append" ? resolved.lineNumber : resolved.lineNumber - 1;
-        result = [
-          ...fileLines.slice(0, idx),
-          ...edit.lines,
-          ...fileLines.slice(idx),
-        ].join("\n");
-        break;
-      }
-      case "delete": {
-        const resolved = resolveAnchor(result, edit.pos);
-        if (!resolved)
-          throw new Error(`[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`);
-        let endLine = resolved.lineNumber;
-        if (edit.end) {
-          const er = resolveAnchor(result, edit.end);
-          if (!er)
-            throw new Error(
-              `[E_NO_MATCH] 锚点 "${edit.end}" 未找到或哈希不匹配`,
-            );
-          endLine = er.lineNumber;
-        }
-        result = [
-          ...fileLines.slice(0, resolved.lineNumber - 1),
-          ...fileLines.slice(endLine),
-        ].join("\n");
-        break;
-      }
+  // result 存储不含 \n 的行，最终 join("\n")
+  const result: string[] = [];
+
+  // 文件头 prepend（无 pos）
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i]!.op === "prepend" && !sorted[i]!.pos) {
+      result.push(...(sorted[i] as { content: string }).content.split("\n"));
+      sorted.splice(i, 1);
+      i--;
     }
   }
 
-  if (hadTrailingNewline && result.length > 0 && !result.endsWith("\n")) {
-    result += "\n";
+  for (const hl of hashlines(content)) {
+    const [meta, raw] = hl;
+    const lineText = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
+
+    if (meta.lineNumber < skipTo) continue;
+
+    const preLines: string[] = [];
+    const postLines: string[] = [];
+    let handled = false;
+
+    while (
+      editIdx < sorted.length &&
+      editStartLine(sorted[editIdx]!) <= meta.lineNumber
+    ) {
+      const edit = sorted[editIdx]!;
+      const startLine = editStartLine(edit);
+
+      if (startLine < meta.lineNumber) {
+        editIdx++;
+        continue;
+      }
+
+      if (edit.op === "replace") {
+        const posHash = expectedHash(edit.pos);
+        if (posHash && meta.hash !== posHash)
+          throw new Error(`[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`);
+        let endLine = meta.lineNumber;
+        if (edit.end) endLine = parseLineRef(edit.end).line;
+        result.push(...edit.content.split("\n"));
+        skipTo = endLine + 1;
+        handled = true;
+      } else if (edit.op === "delete") {
+        const posHash = expectedHash(edit.pos);
+        if (posHash && meta.hash !== posHash)
+          throw new Error(`[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`);
+        let endLine = meta.lineNumber;
+        if (edit.end) endLine = parseLineRef(edit.end).line;
+        skipTo = endLine + 1;
+        handled = true;
+      } else if (edit.op === "append") {
+        if (edit.pos) {
+          const posHash = expectedHash(edit.pos);
+          if (posHash && meta.hash !== posHash)
+            throw new Error(
+              `[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`,
+            );
+        }
+        postLines.push(...edit.content.split("\n"));
+      } else if (edit.op === "prepend") {
+        if (edit.pos) {
+          const posHash = expectedHash(edit.pos);
+          if (posHash && meta.hash !== posHash)
+            throw new Error(
+              `[E_NO_MATCH] 锚点 "${edit.pos}" 未找到或哈希不匹配`,
+            );
+        }
+        preLines.push(...edit.content.split("\n"));
+      }
+
+      editIdx++;
+    }
+
+    if (handled) continue;
+
+    result.push(...preLines);
+    result.push(lineText);
+    result.push(...postLines);
   }
 
-  return { content: result, recovered };
+  // 检查未处理的 edits（锚点越界或不存在）
+  for (let i = editIdx; i < sorted.length; i++) {
+    const edit = sorted[i]!;
+    if ((edit.op === "append" || edit.op === "prepend") && !edit.pos) continue;
+    const anchor =
+      edit.op === "replace" || edit.op === "delete" ? edit.pos : edit.pos!;
+    throw new Error(`[E_NO_MATCH] 锚点 "${anchor}" 未找到或哈希不匹配`);
+  }
+
+  // 文件尾 append（无 pos）
+  for (const edit of sorted) {
+    if (edit.op === "append" && !edit.pos) {
+      result.push(...edit.content.split("\n"));
+    }
+  }
+
+  let resultStr = result.join("\n");
+  if (hadTrailingNewline && resultStr.length > 0 && !resultStr.endsWith("\n")) {
+    resultStr += "\n";
+  }
+  return { content: resultStr, recovered };
 }
 
 // ─── Streaming ──────────────────────────────────────────

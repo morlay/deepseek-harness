@@ -3,7 +3,7 @@ import {
   createContext,
   createTempDir,
   toolInput,
-  ABS_PATH,
+  isAbsPath,
 } from "deepseek-harness/testing";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -46,7 +46,7 @@ describe("path-params", () => {
     for (const args of inputs) {
       const fp = args.filePath ?? args.path;
       expect(fp).toBeTruthy();
-      expect(fp).not.toMatch(ABS_PATH);
+      expect(isAbsPath(fp, tmp.path), "filePath 禁止外部绝对路径").toBe(false);
     }
   }, 90_000);
 
@@ -65,8 +65,9 @@ describe("path-params", () => {
     );
     expect(inputs.length).toBeGreaterThan(0);
     for (const args of inputs) {
-      expect(args.filePath).toBeTruthy();
-      expect(args.filePath).not.toMatch(ABS_PATH);
+      const fp = args.filePath ?? args.ops?.[0]?.filePath;
+      expect(fp).toBeTruthy();
+      expect(isAbsPath(fp, tmp.path), "filePath 禁止外部绝对路径").toBe(false);
     }
   }, 90_000);
 
@@ -83,7 +84,10 @@ describe("path-params", () => {
     for (const args of inputs) {
       expect(args.pattern).toBeTruthy();
       const fp = args.filePath ?? args.path;
-      if (fp) expect(fp).not.toMatch(ABS_PATH);
+      if (fp)
+        expect(isAbsPath(fp, tmp.path), "filePath 禁止外部绝对路径").toBe(
+          false,
+        );
     }
   }, 90_000);
 

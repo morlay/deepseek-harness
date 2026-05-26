@@ -4,7 +4,7 @@ import {
   createTempDir,
   toolsCalled,
   toolInput,
-  ABS_PATH,
+  isAbsPath,
 } from "deepseek-harness/testing";
 import type { Session } from "@opencode-ai/sdk/v2";
 
@@ -56,7 +56,10 @@ console.log(PI);
     if (inputs.length > 0) {
       for (const args of inputs) {
         expect(args.pattern).toBeTruthy();
-        if (args.path) expect(args.path).not.toMatch(ABS_PATH);
+        if (args.path)
+          expect(isAbsPath(args.path, tmp.path), "path 禁止外部绝对路径").toBe(
+            false,
+          );
       }
     }
   }, 90_000);
@@ -77,7 +80,10 @@ console.log(PI);
     if (inputs.length > 0) {
       for (const args of inputs) {
         expect(args.pattern).toBeTruthy();
-        if (args.path) expect(args.path).not.toMatch(ABS_PATH);
+        if (args.path)
+          expect(isAbsPath(args.path, tmp.path), "path 禁止外部绝对路径").toBe(
+            false,
+          );
       }
     }
   }, 90_000);
@@ -96,7 +102,10 @@ console.log(PI);
     for (const args of inputs) {
       expect(args.pattern, "astgrep pattern 必填").toBeTruthy();
       expect(args.pattern).toMatch(/\$|const|export/);
-      if (args.path) expect(args.path).not.toMatch(ABS_PATH);
+      if (args.path)
+        expect(isAbsPath(args.path, tmp.path), "path 禁止外部绝对路径").toBe(
+          false,
+        );
     }
   }, 90_000);
 
@@ -113,7 +122,10 @@ console.log(PI);
     for (const args of inputs) {
       expect(args.pattern).toBeTruthy();
       expect(args.pattern).toContain("*");
-      if (args.path) expect(args.path).not.toMatch(ABS_PATH);
+      if (args.path)
+        expect(isAbsPath(args.path, tmp.path), "path 禁止外部绝对路径").toBe(
+          false,
+        );
     }
   }, 90_000);
 });

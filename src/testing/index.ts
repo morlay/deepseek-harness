@@ -4,7 +4,7 @@ export { createTempDir } from "./tmp-dir.ts";
 export {
   toolsCalled,
   toolInput,
-  ABS_PATH,
+  isAbsPath,
   reasoningText,
   hasEnglishSentence,
   assistantText,

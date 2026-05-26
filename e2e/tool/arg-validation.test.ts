@@ -3,7 +3,7 @@ import {
   createContext,
   createTempDir,
   toolInput,
-  ABS_PATH,
+  isAbsPath,
 } from "deepseek-harness/testing";
 import type { Session } from "@opencode-ai/sdk/v2";
 
@@ -90,9 +90,11 @@ describe("arg-validation", () => {
     expect(args.length).toBeGreaterThan(0);
 
     for (const a of args) {
-      expect(a.filePath, "filePath 必填").toBeTruthy();
-      expect(a.filePath).not.toMatch(ABS_PATH);
-      expect(a.content !== undefined, "content 必填").toBe(true);
+      const fp = a.filePath ?? a.ops?.[0]?.filePath;
+      const ct = a.content ?? a.ops?.[0]?.edits?.[0]?.content;
+      expect(fp, "filePath 必填").toBeTruthy();
+      expect(isAbsPath(fp, tmp.path), "filePath 禁止外部绝对路径").toBe(false);
+      expect(ct !== undefined, "content 必填").toBe(true);
     }
   }, 90_000);
 

@@ -7,6 +7,7 @@ import {
   stripHashline,
   applyEdits,
   formatHashlineStream,
+  lines,
 } from "../index.ts";
 
 describe("computeLineHash", () => {
@@ -120,7 +121,7 @@ describe("applyEdits", () => {
     const content = "line1\nline2\nline3\n";
     const anchor = "2#" + computeLineHash(2, "line2");
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, lines: ["NEW2"] },
+      { op: "replace", pos: anchor, content: "NEW2" },
     ]);
     expect(result.content).toBe("line1\nNEW2\nline3\n");
     expect(result.recovered).toBe(0);
@@ -131,7 +132,7 @@ describe("applyEdits", () => {
     const start = "2#" + computeLineHash(2, "b");
     const end = "4#" + computeLineHash(4, "d");
     const result = applyEdits(content, [
-      { op: "replace", pos: start, end, lines: ["X", "Y"] },
+      { op: "replace", pos: start, end, content: "X\nY" },
     ]);
     expect(result.content).toBe("a\nX\nY\ne\n");
   });
@@ -140,13 +141,13 @@ describe("applyEdits", () => {
     const content = "a\nb\nc\n";
     const anchor = "2#" + computeLineHash(2, "b");
     const result = applyEdits(content, [
-      { op: "append", pos: anchor, lines: ["b2"] },
+      { op: "append", pos: anchor, content: "b2" },
     ]);
     expect(result.content).toBe("a\nb\nb2\nc\n");
   });
 
   it("append 无锚点时追加到文件末尾", () => {
-    const result = applyEdits("a\nb\n", [{ op: "append", lines: ["c"] }]);
+    const result = applyEdits("a\nb\n", [{ op: "append", content: "c" }]);
     expect(result.content).toBe("a\nb\nc\n");
   });
 
@@ -154,13 +155,13 @@ describe("applyEdits", () => {
     const content = "a\nb\nc\n";
     const anchor = "2#" + computeLineHash(2, "b");
     const result = applyEdits(content, [
-      { op: "prepend", pos: anchor, lines: ["beforeB"] },
+      { op: "prepend", pos: anchor, content: "beforeB" },
     ]);
     expect(result.content).toBe("a\nbeforeB\nb\nc\n");
   });
 
   it("prepend 无锚点时插入到文件开头", () => {
-    const result = applyEdits("a\nb\n", [{ op: "prepend", lines: ["header"] }]);
+    const result = applyEdits("a\nb\n", [{ op: "prepend", content: "header" }]);
     expect(result.content).toBe("header\na\nb\n");
   });
 
@@ -184,7 +185,7 @@ describe("applyEdits", () => {
     const a2 = "2#" + computeLineHash(2, "2");
     const a4 = "4#" + computeLineHash(4, "4");
     const result = applyEdits(content, [
-      { op: "replace", pos: a2, lines: ["TWO"] },
+      { op: "replace", pos: a2, content: "TWO" },
       { op: "delete", pos: a4 },
     ]);
     expect(result.content).toBe("1\nTWO\n3\n5\n");
@@ -193,30 +194,30 @@ describe("applyEdits", () => {
   it("锚点哈希不匹配 throw", () => {
     const content = "hello\n";
     expect(() =>
-      applyEdits(content, [{ op: "replace", pos: "1#XX", lines: ["x"] }]),
+      applyEdits(content, [{ op: "replace", pos: "1#XX", content: "x" }]),
     ).toThrow(/E_NO_MATCH/);
   });
 
   it("锚点行号越界 throw", () => {
     const content = "hello\n";
     expect(() =>
-      applyEdits(content, [{ op: "replace", pos: "99#XX", lines: ["x"] }]),
+      applyEdits(content, [{ op: "replace", pos: "99#XX", content: "x" }]),
     ).toThrow(/E_NO_MATCH/);
   });
 
   it("空文件 replace 报错", () => {
     expect(() =>
-      applyEdits("", [{ op: "replace", pos: "1#XX", lines: ["x"] }]),
+      applyEdits("", [{ op: "replace", pos: "1#XX", content: "x" }]),
     ).toThrow(/E_NO_MATCH/);
   });
 
   it("空文件 append 无锚点可创建内容", () => {
-    const result = applyEdits("", [{ op: "append", lines: ["hello"] }]);
+    const result = applyEdits("", [{ op: "append", content: "hello" }]);
     expect(result.content).toBe("hello");
   });
 
   it("空文件 prepend 无锚点可创建内容", () => {
-    const result = applyEdits("", [{ op: "prepend", lines: ["hello"] }]);
+    const result = applyEdits("", [{ op: "prepend", content: "hello" }]);
     expect(result.content).toBe("hello");
   });
 
@@ -231,6 +232,51 @@ describe("applyEdits", () => {
       { op: "delete", pos: "2#" + computeLineHash(2, "b") },
     ]);
     expect(r2.content).toBe("a");
+  });
+
+  it("内容含字面 \\\\n 不被 split 误断", () => {
+    const content = "col1\\ncol2\n";
+    const anchor = "1#" + computeLineHash(1, "col1\\ncol2");
+    const result = applyEdits(content, [
+      { op: "replace", pos: anchor, content: "new" },
+    ]);
+    expect(result.content).toBe("new\n");
+  });
+
+  it("内容含字面 \\\\n 的多行替换", () => {
+    const content = "a\\nb\nc\n";
+    const anchor = "1#" + computeLineHash(1, "a\\nb");
+    const result = applyEdits(content, [
+      { op: "replace", pos: anchor, content: "X\\nY" },
+    ]);
+    expect(result.content).toBe("X\\nY\nc\n");
+  });
+});
+
+describe("lines", () => {
+  it("空字符串不产出行", () => {
+    expect([...lines("")]).toEqual([]);
+  });
+
+  it("单行无换行不附带 \\n", () => {
+    expect([...lines("hello")]).toEqual(["hello"]);
+  });
+
+  it("单行有换行附带 \\n", () => {
+    expect([...lines("hello\n")]).toEqual(["hello\n"]);
+  });
+
+  it("多行保留每行 \\n", () => {
+    expect([...lines("a\nb\nc\n")]).toEqual(["a\n", "b\n", "c\n"]);
+  });
+
+  it("字面 \\\\n 不被当作换行符", () => {
+    expect([...lines("a\\nb\n")]).toEqual(["a\\nb\n"]);
+  });
+
+  it("精确重建用 join('')", () => {
+    const input = "a\nb\nc\n";
+    expect([...lines(input)].join("")).toBe(input);
   });
 });
 

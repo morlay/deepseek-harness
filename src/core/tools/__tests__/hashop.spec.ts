@@ -57,7 +57,7 @@ describe("hashline 编辑闭环", () => {
           {
             op: "replace",
             pos: anchor,
-            lines: ["export const minus = (a, b) => a - b;"],
+            content: "export const minus = (a, b) => a - b;",
           },
         ],
       },
@@ -81,8 +81,8 @@ describe("hashline 编辑闭环", () => {
       {
         filePath: "config.ts",
         edits: [
-          { op: "replace", pos: anchor1, lines: ["const host = '0.0.0.0';"] },
-          { op: "replace", pos: anchor2, lines: ["const port = 8080;"] },
+          { op: "replace", pos: anchor1, content: "const host = '0.0.0.0';" },
+          { op: "replace", pos: anchor2, content: "const port = 8080;" },
         ],
       },
     ]);
@@ -103,8 +103,8 @@ describe("hashline 编辑闭环", () => {
       {
         filePath: "items.txt",
         edits: [
-          { op: "append", pos: anchor, lines: ["item4"] },
-          { op: "prepend", lines: ["header"] },
+          { op: "append", pos: anchor, content: "item4" },
+          { op: "prepend", content: "header" },
         ],
       },
     ]);
@@ -134,8 +134,8 @@ describe("hashline 编辑闭环", () => {
       {
         filePath: "new.txt",
         edits: [
-          { op: "prepend", lines: ["header"] },
-          { op: "append", lines: ["footer"] },
+          { op: "prepend", content: "header" },
+          { op: "append", content: "footer" },
         ],
       },
     ]);
@@ -144,6 +144,17 @@ describe("hashline 编辑闭环", () => {
     expect(content).toMatch(/footer/);
   });
 
+  it("新建文件：无效锚点 append 等同无锚点，可创建文件", async () => {
+    const { rf, e } = await setupDir();
+    await e([
+      {
+        filePath: "end.txt",
+        edits: [{ op: "append", pos: "end", content: "done=true" }],
+      },
+    ]);
+    const content = await rf("end.txt");
+    expect(content).toBe("done=true");
+  });
   it("跨文件批量编辑：一次调用改多文件", async () => {
     const { pf, rf, g, e } = await setupDir();
     await pf(
@@ -177,7 +188,7 @@ describe("hashline 编辑闭环", () => {
     // 一次批量调用：每文件一条 replace，pos 用数组
     const calls = [...grouped.entries()].map(([filePath, positions]) => ({
       filePath,
-      edits: [{ op: "replace" as const, pos: positions, lines: ["REPLACED"] }],
+      edits: [{ op: "replace" as const, pos: positions, content: "REPLACED" }],
     }));
 
     await e(calls);
@@ -223,7 +234,7 @@ describe("hashline 编辑闭环", () => {
       {
         filePath: "keep.ts",
         edits: [
-          { op: "replace", pos: anchor, lines: ["export const a = 999;"] },
+          { op: "replace", pos: anchor, content: "export const a = 999;" },
         ],
       },
       { filePath: "remove.ts", delete: true },

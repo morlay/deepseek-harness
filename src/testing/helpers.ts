@@ -20,7 +20,11 @@ export function toolInput(messages: any[], name: string): any[] {
   return args;
 }
 
-export const ABS_PATH = /^\/|\.\.|^[A-Za-z]:[\\/]/;
+/** 检查 filePath 是否为非法绝对路径（工作目录前缀的绝对路径视为合法） */
+export function isAbsPath(fp: string, cwd: string): boolean {
+  if (fp.startsWith(cwd + "/") || fp === cwd) return false;
+  return /^\/|\.\.|^[A-Za-z]:[\\/]/.test(fp);
+}
 
 /** 提取 session messages 中所有 reasoning (thinking) 文本，拼接为单个字符串 */
 export function reasoningText(messages: any[]): string {
