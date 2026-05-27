@@ -61,40 +61,25 @@ describe("astgrep 结构化搜索", () => {
 });
 
 describe("astedit 结构化改写", () => {
-  it("dryRun 预览 → 确认后改写：搜索 const 声明并替换", async () => {
+  it("astgrep 确认范围 → astedit 执行 const → let 替换", async () => {
     const { ctx, pf, rf } = await setupDir();
     await pf("src/target.ts", "const x = 1;\nconst y = 2;\n");
 
-    // 1. dryRun 预览
-    const preview = await astedit().execute(
+    // 1. astgrep 先确认匹配范围
+    const searched = await astgrep().execute(
+      { pattern: "const $NAME = $VALUE", lang: "typescript" },
+      ctx,
+    );
+    const searchOut = typeof searched === "string" ? searched : searched.output;
+    expect(searchOut).toMatch(/const x = 1/);
+    expect(searchOut).toMatch(/const y = 2/);
+
+    // 2. astedit 执行替换
+    await astedit().execute(
       {
         pattern: "const $NAME = $VALUE",
         rewrite: "let $NAME = $VALUE",
         lang: "typescript",
-        dryRun: true,
-      },
-      ctx,
-    );
-    const previewOut = typeof preview === "string" ? preview : preview.output;
-    expect(previewOut).toMatch(/\n-/);
-    expect(previewOut).toMatch(/\n\+/);
-
-    // 2. 确认执行 — 用 pattern 搜索并直接文本替换
-    await astedit().execute(
-      {
-        pattern: "const x = 1",
-        rewrite: "let x = 1",
-        lang: "typescript",
-        dryRun: false,
-      },
-      ctx,
-    );
-    await astedit().execute(
-      {
-        pattern: "const y = 2",
-        rewrite: "let y = 2",
-        lang: "typescript",
-        dryRun: false,
       },
       ctx,
     );

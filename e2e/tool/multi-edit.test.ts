@@ -178,24 +178,15 @@ const e = 5
     void ctx.logStats();
 
     // 第二轮：改 version（锚点在第一轮 returned 里）
-    await ctx.promptText(
-      session,
-      'pkg.json 的 version 改成 "3.0.0"',
-    );
+    await ctx.promptText(session, 'pkg.json 的 version 改成 "3.0.0"');
     void ctx.logStats();
 
     // 第三轮：改 author（锚点在第一轮 returned 里）
-    await ctx.promptText(
-      session,
-      'pkg.json 的 author 改成 "bob"',
-    );
+    await ctx.promptText(session, 'pkg.json 的 author 改成 "bob"');
     void ctx.logStats();
 
     // 第四轮：改 license（锚点仍在第一轮 returned 里）
-    await ctx.promptText(
-      session,
-      'pkg.json 的 license 改成 "Apache-2.0"',
-    );
+    await ctx.promptText(session, 'pkg.json 的 license 改成 "Apache-2.0"');
 
     const content = await readFile(join(tmp.path, "pkg.json"), "utf-8");
     expect(content).toContain('"3.0.0"');
@@ -206,24 +197,15 @@ const e = 5
 
   it("同一行反复改中间夹删除 — 锚点过期后重搜", async () => {
     // 第一轮：改 c（第 3 行）
-    await ctx.promptText(
-      session,
-      "lines.ts 的 const c = 3 改成 const c = 30",
-    );
+    await ctx.promptText(session, "lines.ts 的 const c = 3 改成 const c = 30");
     void ctx.logStats();
 
     // 第二轮：删除 b（第 2 行），c 从第 3 行 → 第 2 行，旧锚点 3#XX 过期
-    await ctx.promptText(
-      session,
-      "删除 lines.ts 里 const b = 2 这一行",
-    );
+    await ctx.promptText(session, "删除 lines.ts 里 const b = 2 这一行");
     void ctx.logStats();
 
     // 第三轮：再改 c（旧锚点已过期，必须重搜或复用第二轮返回的变更清单）
-    await ctx.promptText(
-      session,
-      "把 lines.ts 的 c 值改成 const c = 300",
-    );
+    await ctx.promptText(session, "把 lines.ts 的 c 值改成 const c = 300");
 
     const content = await readFile(join(tmp.path, "lines.ts"), "utf-8");
     expect(content).toContain("const c = 300");

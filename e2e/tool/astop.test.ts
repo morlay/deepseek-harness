@@ -44,10 +44,10 @@ export const greet = (name: string) => \`Hello \${name}\`
     await ctx.logStats();
   }, 90_000);
 
-  it("astedit dryRun 预览后执行 const → let 重构", async () => {
+  it("astgrep 确认 → astedit 执行 const → let 重构", async () => {
     await ctx.promptText(
       session,
-      "src/math.ts 里的 const 声明改成 let，先用 astedit dryRun 看看要改什么，确认后再执行。",
+      "src/math.ts 里的 const 声明改成 let，先用 astgrep 确认有哪些匹配，然后用 astedit 执行替换。",
     );
 
     const content = await readFile(join(tmp.path, "src/math.ts"), "utf-8");

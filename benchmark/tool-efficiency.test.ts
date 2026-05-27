@@ -195,7 +195,7 @@ describe("benchmark", () => {
         return {
           tmp,
           prompt:
-            "src/math.ts 里的 const 声明改成 let，先用 astedit dryRun 预览，确认后执行。",
+            "src/math.ts 里的 const 声明改成 let，先用 astgrep 确认有哪些匹配，然后用 astedit 执行替换。",
           verify: async () => {
             const c = await tmp.readFile("src/math.ts");
             if (!c.includes("let PI") || c.includes("const PI"))

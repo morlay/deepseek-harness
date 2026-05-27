@@ -335,7 +335,10 @@ function prepareEdit(
   if (edit.op === "delete") {
     return { op: "delete", order, start: startIndex, end: endIndex };
   }
-  const suffix = records[endIndex]!.endsWithNewline && !edit.content.endsWith("\n") ? "\n" : "";
+  const suffix =
+    records[endIndex]!.endsWithNewline && !edit.content.endsWith("\n")
+      ? "\n"
+      : "";
   return {
     op: "replace",
     order,
@@ -343,7 +346,6 @@ function prepareEdit(
     end: endIndex,
     replacement: edit.content + suffix,
   };
-
 }
 
 function isRangeEdit(edit: PreparedEdit): edit is RangeEdit {

@@ -208,7 +208,6 @@ function toEditOp(filePath: string, edit: ToolEditInput): EditOp {
     ...(edit.end ? { end: normalizeAnchor(edit.end) } : {}),
     content,
   };
-
 }
 
 function normalizeAnchor(anchor: string): string {

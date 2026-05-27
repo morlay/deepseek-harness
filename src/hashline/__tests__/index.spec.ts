@@ -241,9 +241,7 @@ e
     const content = `hello
 `;
     expect(() =>
-      applyEdits(content, [
-        { op: "replace", pos: "1#XX", content: "x" },
-      ]),
+      applyEdits(content, [{ op: "replace", pos: "1#XX", content: "x" }]),
     ).toThrow(/E_NO_MATCH/);
   });
 
@@ -251,17 +249,13 @@ e
     const content = `hello
 `;
     expect(() =>
-      applyEdits(content, [
-        { op: "replace", pos: "99#XX", content: "x" },
-      ]),
+      applyEdits(content, [{ op: "replace", pos: "99#XX", content: "x" }]),
     ).toThrow(/E_NO_MATCH/);
   });
 
   it("空文件 replace 报错", () => {
     expect(() =>
-      applyEdits("", [
-        { op: "replace", pos: "1#XX", content: "x" },
-      ]),
+      applyEdits("", [{ op: "replace", pos: "1#XX", content: "x" }]),
     ).toThrow(/E_NO_MATCH/);
   });
 
