@@ -42,13 +42,11 @@ export const withPermission = (writable: boolean) =>
     astedit: writable ? "allow" : "deny",
     // 内置
     glob: "allow",
-    lsp: "allow",
     skill: "allow",
     task: "allow",
     todowrite: "allow",
     webfetch: "allow",
     write: "allow",
-
     // 禁用
     grep: "deny",
     websearch: "deny",

@@ -59,8 +59,7 @@ export const subtract = (a, b) => a - b;
           {
             op: "replace",
             pos: anchor,
-            oldStr: "export const subtract = (a, b) => a - b;",
-            newStr: "export const minus = (a, b) => a - b;",
+            content: "export const minus = (a, b) => a - b;",
           },
         ],
       },
@@ -92,14 +91,12 @@ const port = 3000;
           {
             op: "replace",
             pos: anchor1,
-            oldStr: "const host = 'localhost';",
-            newStr: "const host = '0.0.0.0';",
+            content: "const host = '0.0.0.0';",
           },
           {
             op: "replace",
             pos: anchor2,
-            oldStr: "const port = 3000;",
-            newStr: "const port = 8080;",
+            content: "const port = 8080;",
           },
         ],
       },
@@ -288,8 +285,7 @@ export const x = sub(100, 30)
       edits: positions.map((pos) => ({
         op: "replace" as const,
         pos,
-        oldStr: "sub",
-        newStr: "REPLACED",
+        content: "REPLACED",
       })),
     }));
 
@@ -355,8 +351,7 @@ export const x = sub(100, 30)
           {
             op: "replace",
             pos: anchor,
-            oldStr: "export const a = 1;",
-            newStr: "export const a = 999;",
+            content: "export const a = 999;",
           },
         ],
       },
@@ -441,8 +436,7 @@ export const a = () => ({
         {
           op: "replace" as const,
           pos: anchor,
-          oldStr: "export const a = () => ({",
-          newStr: "export const a = 99;",
+          content: "export const a = 99;",
         },
       ],
     },
@@ -480,8 +474,7 @@ export const grep = (ctx) => ({
         {
           op: "replace" as const,
           pos: anchor,
-          oldStr: `    "受 \`.gitignore\` 影响，示例: grep(pattern:\\"x\\", include:\\"*.ts\\")",`,
-          newStr: `    "受 \`.gitignore\` 影响，示例: grep(pattern:'x', include:'*.ts')",`,
+          content: `    "受 \`.gitignore\` 影响，示例: grep(pattern:'x', include:'*.ts')",`,
         },
       ],
     },

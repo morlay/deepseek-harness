@@ -18,12 +18,12 @@ export const hashedit = () =>
     description: `
 跨文件批量编辑/删除/重命名。ops 每项 { filePath, edits }、{ filePath, delete:true } 或 { filePath, rename }。
 edits 支持四种操作，锚点来自 hashread 或 hashgrep：
-  replace: 在 pos 行或 pos~end 范围内将 oldStr 替换为 newStr
+  replace: 用 content 替换 pos~end 范围的全部内容
   delete:  删除 pos 行；传 end 则删除 pos~end 范围
   append:  在 pos 行后追加 content（无 pos 则追加到文件末尾）
   prepend: 在 pos 行前插入 content
 pos/end 为单个 LINE#HASH 锚点；同文件多处修改请传多条 edit。无锚点 append 可创建新文件，父目录自动创建。返回 diff（-LINE#HASH 为被删旧行，+LINE#HASH 为当前最新锚点），+ 锚点可直接用于下一轮编辑。若编辑改变了行号（删除/插入等），末尾追加 @line(>N, line => line + delta) 指示受影响行的行号偏移，用于推算旧锚点的新行号。
-示例: hashedit(ops: [{ filePath: "a.ts", edits: [{ op: "replace", pos: "2#AB", oldStr: "old", newStr: "new" }] }, { filePath: "b.ts", delete: true }])
+示例: hashedit(ops: [{ filePath: "a.ts", edits: [{ op: "replace", pos: "2#AB", content: "new content" }] }, { filePath: "b.ts", delete: true }])
 `.trim(),
     args: {
       ops: tool.schema
@@ -39,13 +39,9 @@ pos/end 为单个 LINE#HASH 锚点；同文件多处修改请传多条 edit。�
                     end: lineRefSchema
                       .optional()
                       .meta({ description: "结束锚点（可选范围）" }),
-                    oldStr: tool.schema
+                    content: tool.schema
                       .string()
-                      .min(1)
-                      .meta({ description: "要替换的原始文本" }),
-                    newStr: tool.schema
-                      .string()
-                      .meta({ description: "替换后的新文本" }),
+                      .meta({ description: "替换内容（多行用 \\n 分隔）" }),
                   }),
                   tool.schema.object({
                     op: tool.schema.literal("append"),
@@ -174,8 +170,6 @@ type ToolEditInput = {
   pos?: string;
   end?: string;
   content?: string;
-  oldStr?: string;
-  newStr?: string;
 };
 
 function toEditOp(filePath: string, edit: ToolEditInput): EditOp {
@@ -203,19 +197,18 @@ function toEditOp(filePath: string, edit: ToolEditInput): EditOp {
     };
   }
 
-  if (edit.oldStr === undefined || edit.newStr === undefined) {
-    throw new Error(`hashedit: ${filePath} 的 replace 需要 oldStr 和 newStr`);
+  if (edit.content === undefined) {
+    throw new Error(`hashedit: ${filePath} 的 replace 需要 content`);
   }
-  const oldStr = edit.oldStr;
-  const newStr = edit.newStr;
+  const content = edit.content;
 
   return {
     op: "replace",
     pos,
     ...(edit.end ? { end: normalizeAnchor(edit.end) } : {}),
-    oldStr,
-    newStr,
+    content,
   };
+
 }
 
 function normalizeAnchor(anchor: string): string {

@@ -127,7 +127,7 @@ line3
 `;
     const anchor = "2#" + computeLineHash(2, "line2");
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, oldStr: "line2", newStr: "NEW2" },
+      { op: "replace", pos: anchor, content: "NEW2" },
     ]);
     expect(result.content).toBe("line1\nNEW2\nline3\n");
     expect(result.changed.split("\n")).toEqual([
@@ -146,7 +146,7 @@ e
     const start = "2#" + computeLineHash(2, "b");
     const end = "4#" + computeLineHash(4, "d");
     const result = applyEdits(content, [
-      { op: "replace", pos: start, end, oldStr: "b\nc\nd", newStr: "X\nY" },
+      { op: "replace", pos: start, end, content: "X\nY" },
     ]);
     expect(result.content).toBe("a\nX\nY\ne\n");
   });
@@ -231,7 +231,7 @@ e
     const a2 = "2#" + computeLineHash(2, "2");
     const a4 = "4#" + computeLineHash(4, "4");
     const result = applyEdits(content, [
-      { op: "replace", pos: a2, oldStr: "2", newStr: "TWO" },
+      { op: "replace", pos: a2, content: "TWO" },
       { op: "delete", pos: a4 },
     ]);
     expect(result.content).toBe("1\nTWO\n3\n5\n");
@@ -242,7 +242,7 @@ e
 `;
     expect(() =>
       applyEdits(content, [
-        { op: "replace", pos: "1#XX", oldStr: "hello", newStr: "x" },
+        { op: "replace", pos: "1#XX", content: "x" },
       ]),
     ).toThrow(/E_NO_MATCH/);
   });
@@ -252,7 +252,7 @@ e
 `;
     expect(() =>
       applyEdits(content, [
-        { op: "replace", pos: "99#XX", oldStr: "hello", newStr: "x" },
+        { op: "replace", pos: "99#XX", content: "x" },
       ]),
     ).toThrow(/E_NO_MATCH/);
   });
@@ -260,7 +260,7 @@ e
   it("空文件 replace 报错", () => {
     expect(() =>
       applyEdits("", [
-        { op: "replace", pos: "1#XX", oldStr: "hello", newStr: "x" },
+        { op: "replace", pos: "1#XX", content: "x" },
       ]),
     ).toThrow(/E_NO_MATCH/);
   });
@@ -294,7 +294,7 @@ b`,
 `;
     const anchor = "1#" + computeLineHash(1, "col1\\ncol2");
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, oldStr: "col1\\ncol2", newStr: "new" },
+      { op: "replace", pos: anchor, content: "new" },
     ]);
     expect(result.content).toBe("new\n");
   });
@@ -305,7 +305,7 @@ c
 `;
     const anchor = "1#" + computeLineHash(1, "a\\nb");
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, oldStr: "a\\nb", newStr: "X\\nY" },
+      { op: "replace", pos: anchor, content: "X\\nY" },
     ]);
     expect(result.content).toBe("X\\nY\nc\n");
   });
@@ -316,7 +316,7 @@ b
 `;
     const anchor = `2#${computeLineHash(2, "b")}`;
     const result = applyEdits(content, [
-      { op: "replace", pos: anchor, oldStr: "b", newStr: "c" },
+      { op: "replace", pos: anchor, content: "c" },
     ]);
     expect(result.changed.split("\n")).toEqual([
       `-2#${computeLineHash(2, "b")}`,

@@ -3,12 +3,11 @@ export type Pos = string;
 
 export type EditOp =
   | {
-      // 替换单行或范围内容
+      // 用 content 替换 pos~end 范围的整段内容
       op: "replace";
       pos: Pos;
       end?: Pos;
-      oldStr: string;
-      newStr: string;
+      content: string;
     }
   | {
       // 向后插入内容, 无 pos 时
@@ -336,25 +335,15 @@ function prepareEdit(
   if (edit.op === "delete") {
     return { op: "delete", order, start: startIndex, end: endIndex };
   }
-
-  if (edit.oldStr.length === 0) {
-    throw new Error("[E_BAD_EDIT] replace.oldStr 不能为空");
-  }
-
-  const selected = joinRawRecords(content, records, startIndex, endIndex);
-  if (!selected.includes(edit.oldStr)) {
-    throw new Error(
-      `[E_NO_MATCH] oldStr 未在锚点范围 "${edit.pos}${edit.end ? `~${edit.end}` : ""}" 内找到`,
-    );
-  }
-
+  const suffix = records[endIndex]!.endsWithNewline && !edit.content.endsWith("\n") ? "\n" : "";
   return {
     op: "replace",
     order,
     start: startIndex,
     end: endIndex,
-    replacement: selected.replace(edit.oldStr, edit.newStr),
+    replacement: edit.content + suffix,
   };
+
 }
 
 function isRangeEdit(edit: PreparedEdit): edit is RangeEdit {

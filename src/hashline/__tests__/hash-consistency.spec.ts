@@ -64,14 +64,12 @@ export const sub = (a, b) => a - b;
     const beforeHashed = formatFileAsHashline(beforeContent);
     const line1Before = extractHash(beforeHashed, 1);
     const line2Before = extractHash(beforeHashed, 2);
-    const oldStr = "export const sub = (a, b) => a - b;";
-    const anchor = `2#${computeLineHash(2, oldStr)}`;
+    const anchor = `2#${computeLineHash(2, "export const sub = (a, b) => a - b;")}`;
     const editResult = applyEdits(beforeContent, [
       {
         op: "replace",
         pos: anchor,
-        oldStr,
-        newStr: "export const minus = (a, b) => a - b;",
+        content: "export const minus = (a, b) => a - b;",
       },
     ]);
     expect(editResult.changed).toContain("-2#");
@@ -106,7 +104,7 @@ footer
     expect(beforeHashed).not.toMatch(/^4#/m);
     const anchor = `3#${computeLineHash(3, "body")}`;
     const editResult = applyEdits(beforeContent, [
-      { op: "replace", pos: anchor, oldStr: "body", newStr: "modified" },
+      { op: "replace", pos: anchor, content: "modified" },
     ]);
     expect(editResult.changed).toContain("-3#");
     await write("a.txt", editResult.content);
@@ -134,14 +132,12 @@ export const E = 2.718;
       {
         op: "replace",
         pos: anchor1,
-        oldStr: "export const PI = 3.14;",
-        newStr: "export const PI = 3.14159;",
+        content: "export const PI = 3.14159;",
       },
       {
         op: "replace",
         pos: anchor2,
-        oldStr: "export const E = 2.718;",
-        newStr: "export const E = 2.71828;",
+        content: "export const E = 2.71828;",
       },
     ];
     const editResult = applyEdits(beforeContent, edits);
