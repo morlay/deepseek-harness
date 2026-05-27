@@ -24,6 +24,9 @@ export default {
 
         // 务必关闭，与 hashline 不匹配，任务完成后或提交时，统一 format
         config.formatter = false;
+
+        // 不稳定，不如不用
+        config.lsp = false;
       },
       tool: {
         hashread: hashread(),
