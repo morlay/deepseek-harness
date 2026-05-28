@@ -1,0 +1,7 @@
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - "tinyexec@1.2.2"
+allowBuilds:
+  msgpackr-extract: true
+  tree-sitter: true
+  tree-sitter-bash: true

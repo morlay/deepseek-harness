@@ -1,0 +1,42 @@
+{
+  "name": "deepseek-harness",
+  "type": "module",
+  "private": true,
+  "packageManager": "aube@1.16.1",
+  "engines": {
+    "node": ">= 26"
+  },
+  "exports": {
+    "./testingutil": "./src/testingutil/index.ts",
+    "./pikit": "./src/internal/pikit/index.ts",
+    "./hashline": "./src/internal/hashline/index.ts",
+    "./astgrep": "./src/internal/astgrep/index.ts",
+    "./webfetch": "./src/internal/webfetch/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/extensions"
+    ]
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.52",
+    "@ast-grep/napi": "^0.43.0",
+    "@earendil-works/pi-agent-core": "^0.78.0",
+    "@earendil-works/pi-ai": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "es-toolkit": "^1.47.0",
+    "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.0.4",
+    "@types/node": "^25.9.1",
+    "@types/turndown": "^5.0.6",
+    "@typescript/native-preview": "^7.0.0-dev.20260527.2",
+    "hono": "^4.12.23",
+    "oxlint": "^1.67.0",
+    "oxlint-tsgolint": "^0.23.0",
+    "prettier": "^3.8.3",
+    "vitest": "^4.1.7"
+  },
+  "prettier": {}
+}
