@@ -1,6 +1,5 @@
 import { tool } from "@opencode-ai/plugin";
-import { readdir, stat } from "node:fs/promises";
-import { resolve, relative } from "node:path";
+import { resolve } from "node:path";
 import { grepAsHashline } from "../../hashline/index.ts";
 
 function hashlineLineNumber(line: string): number | undefined {
@@ -13,11 +12,11 @@ function hashlineLineNumber(line: string): number | undefined {
 export const hashread = () =>
   tool({
     description: `
-读取文件（每行带 \`LINE#HASH:\` 锚点）或列出目录。
+读取文件（每行带 \`LINE#HASH:\` 锚点）。目录列表请用 glob。
 示例: hashread(filePath: "src/app.ts")、hashread(filePath: "src/app.ts", offset: 5, limit: 10)
 `.trim(),
     args: {
-      filePath: tool.schema.string().meta({ description: "文件或目录的路径" }),
+      filePath: tool.schema.string().meta({ description: "文件路径" }),
       offset: tool.schema
         .number()
         .int()
@@ -33,24 +32,10 @@ export const hashread = () =>
     },
     async execute(args, ctx) {
       const absPath = resolve(ctx.directory, args.filePath);
-      let s: { isDirectory(): boolean };
-      try {
-        s = await stat(absPath);
-      } catch {
-        return { output: `路径不存在: ${args.filePath}` };
-      }
-      if (s.isDirectory()) {
-        const entries = await readdir(absPath, { withFileTypes: true });
-        const rel = relative(ctx.worktree ?? ctx.directory, absPath) || ".";
-        const items = entries
-          .map((e) => `${e.isDirectory() ? "[D]" : "[F]"} ${e.name}`)
-          .join("\n");
-        return { output: `${rel}/ (${entries.length} 项)\n${items}` };
-      }
-      // read = grepAsHashline(".", absPath) — 单文件，取首 block 跳首行
+
       for await (const block of grepAsHashline(".", absPath)) {
         const lines = block.split("\n");
-        lines.shift(); // 去掉首行文件路径
+        lines.shift();
         const defaultLimit = 2000;
         const start = args.offset ?? 1;
         const end = start + (args.limit ?? defaultLimit);
